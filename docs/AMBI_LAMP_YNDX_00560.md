@@ -1,0 +1,31 @@
+# Яндекс Эмби Лампа YNDX-00560
+
+## Подтверждённые факты
+
+В одной испытанной Matter fabric лампа имела endpoint `1`. Operational Node ID в том эксперименте был `258`, но это не универсальный идентификатор: пользователь обязан получить свой актуальный Node ID через `/devices`.
+
+Descriptor ServerList endpoint 1 содержал стандартные clusters Level Control (`8`) и Color Control (`768`), а также vendor-specific `0x132FFC06`, `0x132FFC0A`, `0x132FFC0C`.
+
+Подтверждённые атрибуты/возможности:
+
+- Level CurrentLevel (`cluster=8`, `attribute=0`);
+- Level AcceptedCommandList: `[0,1,2,3,4,5,6,7]`;
+- ColorCapabilities и FeatureMap: `25`;
+- ColorMode `0` (Hue/Saturation) в момент discovery;
+- Hue, Saturation, CurrentX, CurrentY, ColorTemperatureMireds читаются;
+- Color AcceptedCommandList: `[0,1,2,3,4,5,6,7,8,9,10,71,75,76]`;
+- реальные On/Off, MoveToLevel и MoveToHueAndSaturation были выполнены с readback и восстановлением исходного состояния.
+
+## Частично подтверждено
+
+Наличие vendor cluster `0x132FFC06` на endpoint доказано Descriptor ServerList. В `maind` найдены имена YandexColorMusic (`SetEnable`, `SetAnimation`, AutoPlay/AutoRun), однако сопоставление каждого command/attribute с wire schema устройства не завершено. Проект разрешает только read-only discovery глобальных атрибутов этого cluster.
+
+## Не подтверждено и не поддерживается
+
+- неизвестные vendor-команды `0x132FFC06`;
+- семантика clusters `0x132FFC0A` и `0x132FFC0C`;
+- Identify.TriggerEffect как способ запуска цветомузыки;
+- поддержка тех же возможностей на другой ревизии лампы/firmware.
+
+Наличие символов или обработчиков в `maind` не доказывает поддержку cluster конкретным устройством.
+

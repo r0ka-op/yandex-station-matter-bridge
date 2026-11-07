@@ -1,0 +1,22 @@
+# Иллюстративные запросы к API, уже включённому и безопасно изолированному на Станции.
+# Эти строки сами не включают API и НЕ должны отправляться напрямую с ПК в локальную сеть.
+# На исследованной станции используется ssh + wget на 127.0.0.1.
+# Значение nodeId=4660 условное.
+
+### Devices
+GET http://127.0.0.1:8765/devices
+
+### OnOff state: Matter OnOff cluster 6, attribute 0
+POST http://127.0.0.1:8765/interaction/readAttribute
+Content-Type: application/json
+
+{"nodeId":4660,"endpointId":1,"clusterId":6,"attributeId":0}
+
+### Read Descriptor ServerList (cluster 29, attribute 1)
+POST http://127.0.0.1:8765/interaction/readAttribute
+Content-Type: application/json
+
+{"nodeId":4660,"endpointId":1,"clusterId":29,"attributeId":1}
+
+# Mutating invokeCommand requests are intentionally omitted from this beginner example.
+# See docs/API.md for their documented JSON structures.
