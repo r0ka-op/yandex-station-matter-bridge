@@ -18,6 +18,19 @@ from .preflight import format_checks, passed, run_preflight
 from .transport import SshRunner, StationSession
 
 
+def _configure_console_encoding() -> None:
+    """Keep localized CLI output usable when Windows redirects a legacy code page."""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        try:
+            reconfigure(encoding="utf-8", errors="backslashreplace")
+        except (AttributeError, OSError, ValueError):
+            # Test doubles and already-detached streams may not be reconfigurable.
+            continue
+
+
 def _preflight(cfg: Config) -> list:
     if not cfg.station.ssh_alias:
         raise SystemExit("preflight невозможен без [station].ssh_alias; "
@@ -91,6 +104,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    _configure_console_encoding()
     args = _build_parser().parse_args(argv)
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")

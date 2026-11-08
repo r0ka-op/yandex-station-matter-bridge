@@ -22,6 +22,28 @@ from ymatter import preflight as pf
 from ymatter.transport import HttpTransport, MaindError, SshExecTransport
 
 
+CLIENT_ROOT = pathlib.Path(__file__).resolve().parents[1]
+
+
+class CliEncodingTests(unittest.TestCase):
+    def test_help_survives_legacy_windows_output_encoding(self):
+        env = os.environ.copy()
+        env["PYTHONIOENCODING"] = "cp1252"
+        source_root = str(CLIENT_ROOT / "src")
+        env["PYTHONPATH"] = source_root + os.pathsep + env.get("PYTHONPATH", "")
+        proc = subprocess.run(
+            [sys.executable, "-m", "ymatter", "--help"],
+            cwd=CLIENT_ROOT,
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+            timeout=15,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr.decode("utf-8", "replace"))
+        self.assertIn("usage: ymatter", proc.stdout.decode("utf-8"))
+
+
 class StubTransport:
     def __init__(self, payload):
         self.payload = payload
