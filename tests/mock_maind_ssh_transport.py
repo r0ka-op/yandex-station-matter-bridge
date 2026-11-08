@@ -120,7 +120,7 @@ def http_response(command: str):
         sys.stderr.write("wget: download timed out\n__MAIND_WGET_EXIT__=1\n")
         return b"", None, 0
     elif path == "/devices":
-        response = [{"nodeId": 258, "endpoints": [0, 1], "macAddress": "MOCK"}]
+        response = [{"nodeId": 4660, "endpoints": [0, 1], "macAddress": "MOCK"}]
     elif path == "/interaction/readAttribute":
         cluster = int(request["clusterId"])
         attribute = int(request["attributeId"])

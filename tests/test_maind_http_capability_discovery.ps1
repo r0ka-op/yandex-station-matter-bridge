@@ -3,9 +3,9 @@ param([string]$OutputDirectory)
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
-$root = Split-Path -Parent $PSScriptRoot
+$root = Split-Path -Parent (Split-Path -Parent $PSCommandPath)
 . (Join-Path $root 'scripts\maind_http_target_helpers.ps1')
-Set-MaindHttpTarget -NodeId 258 -EndpointId 1
+Set-MaindHttpTarget -NodeId 4660 -EndpointId 1
 . (Join-Path $root 'scripts\maind_http_response_helpers.ps1')
 . (Join-Path $root 'scripts\maind_http_capability_helpers.ps1')
 if (-not $OutputDirectory) {
@@ -25,7 +25,7 @@ $python = (Get-Command python -ErrorAction Stop).Source
 $psi = [Diagnostics.ProcessStartInfo]::new()
 $psi.FileName = $python; $psi.UseShellExecute = $false; $psi.CreateNoWindow = $true
 $psi.RedirectStandardOutput = $true; $psi.RedirectStandardError = $true
-foreach ($arg in @((Join-Path $root 'tests\maind_http_mock_server.py'),'--port',[string]$port)) {
+foreach ($arg in @((Join-Path $root 'scripts\maind_http_mock_server.py'),'--port',[string]$port)) {
     [void]$psi.ArgumentList.Add($arg)
 }
 $server = [Diagnostics.Process]::new(); $server.StartInfo = $psi
@@ -85,8 +85,8 @@ try {
         Assert-True $devicesResponse.IsSuccessStatusCode 'GET /devices failed'
         Assert-True ($devicesBytes.Length -gt 0) 'GET /devices body is empty'
         $devicesText = [Text.Encoding]::UTF8.GetString($devicesBytes)
-        $devices = Get-MaindDevicesJsonAnalysis $devicesText 258
-        Assert-True $devices.Analysis.target_found 'Node 258 absent before discovery'
+        $devices = Get-MaindDevicesJsonAnalysis $devicesText 4660
+        Assert-True $devices.Analysis.target_found 'Node 4660 absent before discovery'
         $calls.Add('GET /devices')
     } finally { $devicesResponse.Dispose() }
     $descriptor = Read-SupportedAttribute 29 1 full descriptor
@@ -141,8 +141,8 @@ try {
     foreach ($bad in @(
         @{m='POST';p='/interaction/invokeCommand';b='{}'},
         @{m='POST';p='/interaction/writeAttribute';b='{}'},
-        @{m='POST';p='/interaction/readAttribute';b='{"nodeId":258,"endpointId":2,"clusterId":29,"attributeId":1}'},
-        @{m='POST';p='/interaction/readAttribute';b='{"nodeId":258,"endpointId":1,"clusterId":6,"attributeId":0}'},
+        @{m='POST';p='/interaction/readAttribute';b='{"nodeId":4660,"endpointId":2,"clusterId":29,"attributeId":1}'},
+        @{m='POST';p='/interaction/readAttribute';b='{"nodeId":4660,"endpointId":1,"clusterId":6,"attributeId":0}'},
         @{m='DELETE';p='/devices';b=$null}
     )) {
         Assert-True (-not (Test-MaindCapabilityRequestAllowed -Method $bad.m -Path $bad.p -RequestBody $bad.b)) `

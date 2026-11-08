@@ -40,6 +40,8 @@ MoveToHueAndSaturation: cluster `768`, command `6`:
 {"nodeId":4660,"endpointId":1,"clusterId":768,"commandId":6,"fields":{"hue":85,"saturation":244,"transitionTime":5,"optionsMask":0,"optionsOverride":0}}
 ```
 
+MoveToColorTemperature объявлена лампой как cluster `768`, command `10`. По доступным структурам API поля имеют вид `colorTemperatureMireds`, `transitionTime`, `optionsMask`, `optionsOverride`, однако эта команда в новом Python-клиенте пока проверена только offline и отключена по умолчанию. Устройство объявило диапазон 154–370 mired.
+
 Успех invoke подтверждается допустимой response structure/status и обязательным readback. Поле `errors` может отсутствовать; само его отсутствие не доказывает успех.
 
 `/interaction/writeAttribute` обнаружен как потенциально изменяющий маршрут, но production allowlists проекта его запрещают. Корневой `/` в реальном тесте возвращал `404 Not found`; это не transport failure.

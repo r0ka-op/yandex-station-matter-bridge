@@ -1,4 +1,4 @@
-> **Внимание: исторические команды.** Они приведены как документация к предыдущему исследовательскому снимку. В этом ознакомительном архиве аппаратные действия удалённого помощника заблокированы из-за устаревшего lifecycle. Не выполняйте эти команды на живой Станции до переноса и проверки актуальной версии с `run_id`.
+> **Внимание:** команды изменяют runtime Станции. Они предназначены только для уже рутованной испытательной системы после проверки бинарников и read-only readiness. Не переносите параметры между моделями или firmware.
 
 # Сценарии
 
@@ -30,6 +30,19 @@ $cfg = Import-PowerShellDataFile .\config.local.psd1
 & .\scripts\start_maind_http_yandex_color_music_discovery.ps1 @cfg `
   -EnableVendorReadOnlyDiscovery `
   -ConfirmToken I_APPROVE_READ_ONLY_YANDEX_COLOR_MUSIC_DISCOVERY
+
+# Полная read-only инвентаризация
+& .\scripts\start_maind_http_full_inventory.ps1 `
+  -Mode Runtime -EnableRuntimeInventory `
+  -TargetNodeId $cfg.MatterNodeId `
+  -SshAlias $cfg.SshAlias -StationIPv4 $cfg.StationIPv4 -StationIPv6 $cfg.StationIPv6 `
+  -ConfirmToken I_APPROVE_ONE_READ_ONLY_FULL_MATTER_INVENTORY
+```
+
+Для offline-проверки оборудования и SSH не требуется:
+
+```powershell
+& .\scripts\start_maind_http_full_inventory.ps1 -Mode Offline
 ```
 
 ## Управляющие эксперименты

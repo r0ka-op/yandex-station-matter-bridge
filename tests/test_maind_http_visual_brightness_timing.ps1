@@ -2,7 +2,9 @@
 param([string]$OutputDirectory)
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version Latest
-$root=Split-Path -Parent $PSScriptRoot
+$root=Split-Path -Parent (Split-Path -Parent $PSCommandPath)
+. (Join-Path $root 'scripts\maind_http_target_helpers.ps1')
+Set-MaindHttpTarget -NodeId 4660 -EndpointId 1
 . (Join-Path $root 'scripts\maind_http_light_control_helpers.ps1')
 if(-not $OutputDirectory){
     $OutputDirectory=Join-Path $root ('results\tests\visual-brightness-timing-'+(Get-Date -Format yyyyMMdd-HHmmss))

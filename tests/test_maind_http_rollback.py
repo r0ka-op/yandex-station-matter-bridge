@@ -54,7 +54,10 @@ def rollback(state: State) -> State:
         else:
             state.possible_light_state_changed = True
     state.patch = state.dirty = state.tag = False
-    if state.activation_started or state.listener:
+    # Rollback owns the platformd lifecycle only after this run crossed its
+    # explicit activation boundary. A listener alone may belong to another
+    # run/process and must not authorize a restart.
+    if state.activation_started:
         state.restart_count += 1
         if state.platformd_restored:
             state.listener = False
@@ -112,6 +115,23 @@ def main() -> None:
         "state": asdict(before_activation),
         "pass": before_activation.restart_count == 0 and not before_activation.listener,
     }
+    foreign_listener_before_activation = rollback(
+        State(
+            listener=True,
+            mounted=False,
+            guard4=True,
+            guard6=True,
+            activation_started=False,
+            mountpoint=False,
+        )
+    )
+    cases["foreign_listener_does_not_authorize_restart"] = {
+        "state": asdict(foreign_listener_before_activation),
+        "pass": foreign_listener_before_activation.restart_count == 0
+        and foreign_listener_before_activation.guard4
+        and foreign_listener_before_activation.guard6
+        and not foreign_listener_before_activation.completed,
+    }
     color_restore = rollback(State(light_restore_armed=True))
     cases["color_restore_before_api_shutdown"] = {
         "state": asdict(color_restore),
@@ -133,6 +153,20 @@ def main() -> None:
     cases["light_restore_clear_arguments_forwarded"] = {
         "state": {"dispatcher_match": dispatch_fixed},
         "pass": dispatch_fixed,
+    }
+    lifecycle_guards = all(
+        token in helper
+        for token in (
+            'RUN_ROOT="/tmp/maind-http-runs"',
+            'LOCK_DIR="/tmp/maind-http-runtime.lock"',
+            'marker_is_ours completed',
+            'marker_is_ours activation.started',
+            'preflight) preflight "${2:-}" ;;',
+        )
+    )
+    cases["per_run_lifecycle_guards_present"] = {
+        "state": {"source_checks": lifecycle_guards},
+        "pass": lifecycle_guards,
     }
     result["all_pass"] = all(v["pass"] for v in cases.values())
     out = Path(__file__).resolve().parents[1] / "results" / "maind_http_rollback_model_test.json"

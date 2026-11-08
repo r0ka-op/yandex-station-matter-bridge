@@ -1,0 +1,29 @@
+{
+  "provenance": "sanitized capability subset of the 2026-11-08 real inventory",
+  "nodeId": 4660,
+  "endpoints": [0, 1],
+  "target": {
+    "endpointId": 1,
+    "deviceTypes": [269],
+    "serverClusters": [3, 4, 6, 8, 29, 80, 768, 321911814, 321911818, 321911820],
+    "attributes": {
+      "6": [0, 16384, 16385, 16386, 16387, 65528, 65529, 65531, 65532, 65533],
+      "8": [0, 1, 2, 3, 15, 16, 17, 18, 19, 20, 16384, 65528, 65529, 65531, 65532, 65533],
+      "768": [0, 1, 2, 3, 4, 7, 8, 15, 16, 16385, 16394, 16395, 16396, 16397, 16400, 65528, 65529, 65531, 65532, 65533]
+    },
+    "acceptedCommands": {
+      "6": [0, 1, 2, 64, 65, 66],
+      "8": [0, 1, 2, 3, 4, 5, 6, 7],
+      "768": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 71, 75, 76]
+    },
+    "featureMaps": {"6": 1, "8": 0, "768": 25},
+    "colorTemperatureMireds": {"min": 154, "max": 370}
+  },
+  "commissioning": {"supportedFabrics": 5, "commissionedFabrics": 1},
+  "vendorModeNames": ["None", "Color", "Scene", "Color music"],
+  "observedErrors": [
+    {"clusterId": 80, "attributeId": 2, "class": "HTTP_ERROR", "httpStatus": 500},
+    {"clusterId": 80, "attributeId": 3, "class": "HTTP_ERROR", "httpStatus": 500}
+  ],
+  "privacy": "Private identifiers and cryptographic material removed."
+}

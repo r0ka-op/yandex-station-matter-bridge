@@ -1,12 +1,17 @@
-# Вклад в проект
+# Contributing
 
-Перед pull request:
+Pull requests are welcome when they preserve the project's safety boundaries.
 
-1. Не добавляйте firmware, proprietary binaries, приватные ключи или runtime archives.
-2. Не ослабляйте fail-closed guards и allowlists.
-3. Добавьте offline regression test для изменённой ветки.
-4. Запустите `pwsh -NoProfile -File tests/run_offline_tests.ps1`.
-5. Очистите примеры и диагностику от адресов личной сети и уникальных идентификаторов.
+1. Do not add firmware, proprietary binaries, private keys, credentials, real
+   device identifiers, private inventory archives, or local configuration.
+2. Do not weaken fail-closed guards, request allowlists, rollback, or
+   `verify-clean` checks.
+3. Add an offline regression test for every changed branch.
+4. Run the client suite with
+   `python -m unittest discover -s client/tests -t client -v`.
+5. Run the production controller harness with
+   `pwsh -NoProfile -File tests/run_full_matter_controller_audit.ps1`.
+6. Run publication and link checks from `tools/`.
 
-Реальные device tests должны быть явно opt-in и никогда не запускаться стандартным offline test runner.
-
+Hardware tests must remain explicit opt-in procedures. They must never run in
+CI or as an implicit part of an offline test command.

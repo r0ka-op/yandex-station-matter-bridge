@@ -1,68 +1,154 @@
-# Yandex Station Matter HTTP API
+# Yandex Station Matter HTTP API and `ymatter`
 
-Небольшое исследование встроенного Matter HTTP API в `maind` Яндекс Станции и набор вспомогательных скриптов.
+Исследование встроенного Matter HTTP API Яндекс Станции и Python-клиент для работы с уже сопряжёнными Matter-устройствами.
 
-Автор исследования и материалов: **[r0ka-op](https://github.com/r0ka-op)**, 2026.
+Created and maintained by [r0ka-op](https://github.com/r0ka-op).
 
-В штатном `maind --platformd` обнаружен HTTP API на TCP/8765, выключенный по умолчанию. Через него удалось управлять сопряжённой Эмби Лампой YNDX-00560: включение, выключение, яркость и цвет. **Ни лампу, ни Matter-протокол для этого не перепрошивали.** Контроллером выступает сама Станция.
+Проект не связан с Яндексом. Он не содержит прошивки, OEM-бинарники, Matter credentials или приватные дампы.
 
-> **Статус этого архива: исходники для ознакомления, не готовый установщик.** В присланном снимке остался **старый runtime lifecycle** (`/tmp/maind-http-test`), который в последующих экспериментах был заменён на изолированные запуски с `run_id`. Исправленный код **не был приложен к этому архиву**, поэтому в этой копии запуск, изменяющий состояние Станции, заблокирован на уровне удалённого помощника. Не используйте этот пакет для активации API на реальном устройстве; сначала перенесите проверенную актуальную версию из рабочего исследовательского репозитория и заново выполните аудит.
+## Что обнаружено
 
-## Что удалось проверить
-
-- Яндекс Станция Мини 2, прошивка `0.369.1.46.4793643989.20261020.299`.
-- Встроенный `maind` поддерживает `GET /devices`, `POST /interaction/readAttribute` и `POST /interaction/invokeCommand`.
-- На сопряжённой Эмби Лампе YNDX-00560 работают OnOff (`0x0006`), LevelControl (`0x0008`), ColorControl (`0x0300`).
-- Обнаружены три фирменных кластера: `0x132FFC06`, `0x132FFC0A`, `0x132FFC0C`. Назначение и команды пока изучены не полностью.
-- Наличие Matter-соединения **не означает**, что лампа уже поддерживает самостоятельное сопряжение со сторонним контроллером.
-
-Официальная совместимость с другими моделями Станций **не подтверждена**.
-
-## Как устроено управление
+В штатном процессе `maind --platformd` Яндекс Станции Мини 2 обнаружен HTTP control plane на TCP/8765. Он позволяет Станции, уже являющейся авторизованным Matter-контроллером, перечислять устройства, читать атрибуты и вызывать команды.
 
 ```text
-Наш ПК --SSH--> Яндекс Станция --maind HTTP 127.0.0.1:8765-->
-      штатный Matter-контроллер --Matter/UDP 5540--> лампа
+ПК ──SSH exec──> Станция ──wget 127.0.0.1:8765──> maind
+                                                     │
+                                                     └──Matter/UDP 5540──> устройство
 ```
 
-В штатном ПО Станции есть конфигурационный параметр:
+API по умолчанию выключен. В проверенной прошивке при включении он слушает `0.0.0.0:8765` и `[::]:8765` без клиентской HTTP-аутентификации. Поэтому его нельзя оставлять доступным из LAN: IPv4- и IPv6-изоляция должны устанавливаться **до** появления listener.
 
-```json
-{"matter":{"httpControl":{"enabled":true}}}
+Подробности: [обнаружение](docs/DISCOVERY.md), [HTTP API](docs/API.md), [модель безопасности](docs/SAFETY.md), [совместимость](docs/COMPATIBILITY.md).
+
+## Реальная read-only инвентаризация
+
+7–8 ноября 2026 года выполнен один полный read-only сеанс на Эмби Лампе YNDX-00560:
+
+- 263 API-запроса, 237 успешных чтений;
+- 2 endpoint и 22 server-кластера;
+- три vendor-кластера Яндекса: `0x132FFC06`, `0x132FFC0A`, `0x132FFC0C`;
+- в читаемом списке режимов: `None`, `Color`, `Scene`, `Color music`;
+- Color Control объявляет Hue/Saturation, XY и Color Temperature;
+- диапазон Color Temperature: 154–370 mired;
+- `SupportedFabrics=5`, `CommissionedFabrics=1` — это не доказательство возможности независимого сопряжения;
+- lifecycle временной активации, rollback и postflight завершились успешно.
+
+Обезличенная техническая сводка: [docs/REAL_INVENTORY.md](docs/REAL_INVENTORY.md). Vendor-команды в ходе инвентаризации не вызывались.
+
+## Python-клиент `ymatter`
+
+Клиент находится в [`client/`](client/) и предоставляет:
+
+- SSH-exec transport через BusyBox `wget` к loopback API;
+- `doctor`, `devices`, `discover`, `state`;
+- On/Off, brightness и Hue/Saturation;
+- экспериментальную Color Temperature с явным opt-in и проверкой диапазона;
+- MQTT bridge и Home Assistant MQTT Discovery;
+- TOML-конфигурацию и fail-closed preflight.
+
+Клиент не привязан к конкретному Node ID: световой endpoint выбирается по `/devices` и Descriptor, затем проверяются ServerList, AttributeList и AcceptedCommandList.
+
+### Установка
+
+Требуется Python 3.11 или новее.
+
+```bash
+python -m venv .venv
+# Windows: .venv\Scripts\activate
+# Linux/macOS: source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install ./client
 ```
 
-Для проверки использовались временный конфигурационный патч Quasar и перезапуск `platformd`. Штатные файлы `maind` не заменялись. Пример запроса:
+Для MQTT:
 
-```http
-POST /interaction/readAttribute HTTP/1.1
-Host: 127.0.0.1:8765
-Content-Type: application/json
-
-{"nodeId":4660,"endpointId":1,"clusterId":6,"attributeId":0}
+```bash
+python -m pip install './client[mqtt]'
 ```
 
-`nodeId` здесь **пример**, а не универсальный ID лампы. Более подробные запросы — в [docs/API.md](docs/API.md) и [examples/matter_requests.http](examples/matter_requests.http).
+Создайте локальную конфигурацию вне Git:
 
-> **Безопасность:** при включении `maind` слушает `0.0.0.0:8765` и `[::]:8765` без собственной HTTP-аутентификации. Не включайте его без заранее настроенных ограничений IPv4 и IPv6. Подробнее: [docs/SAFETY.md](docs/SAFETY.md).
+```bash
+cp client/config.example.toml config.toml
+```
 
-## Что в архиве
+Укажите SSH alias Станции и её LAN IPv4. Пароль MQTT передавайте через `YMATTER_MQTT_PASSWORD`, а не сохраняйте в репозитории.
 
-- `docs/` — описание обнаруженного API, границы проверенной совместимости, история эксперимента и риски.
-- `examples/` — безопасные текстовые примеры запросов и шаблон конфигурации.
-- `scripts/` — исходники контроллеров и вспомогательных компонентов **для изучения**. В этом архиве реальный запуск заблокирован, пока код не синхронизирован с новой исследовательской версией.
-- `tests/` — offline-тесты и имитация окружения, перенесённые из предыдущей версии. Они **не подтверждают** корректность нового lifecycle.
-- `tools/build_source_release.ps1` — сборка исходного ZIP по явному списку разрешённых путей.
+### Первичная проверка
 
-Описание прежних сценариев сохранено в [docs/USAGE.md](docs/USAGE.md), но **не является инструкцией по запуску именно этого snapshot на живой Станции**.
+API должен быть уже временно активирован проверенным lifecycle и изолирован firewall. Dropbear на испытанной Станции запрещал SSH `direct-tcpip`, поэтому клиент по умолчанию использует SSH exec, а не `ssh -L`.
 
-## Для тех, кто хочет помочь
+```bash
+ymatter --config config.toml doctor
+ymatter --config config.toml devices
+ymatter --config config.toml discover
+ymatter --config config.toml state
+```
 
-Буду рад замечаниям по схеме API, версии прошивки, Matter-кластерам и безопасности. Если тестируете другую модель, сначала сравните бинарники, конфигурацию и механизм `platformd`; не переносите команды перезапуска вслепую.
+### CLI-управление
 
-- GitHub: **[r0ka-op](https://github.com/r0ka-op)**
-- [Описание находки](docs/DISCOVERY.md)
-- [API](docs/API.md)
-- [Совместимость](docs/COMPATIBILITY.md)
-- [Безопасность](docs/SAFETY.md)
+Следующие команды меняют физическое состояние устройства. Сначала сохраните baseline и обеспечьте восстановление:
 
-Код проекта — [Apache-2.0](LICENSE). Лицензия позволяет использование и перераспространение при соблюдении её условий. Проект не связан с Яндексом, не содержит штатные бинарники, прошивку или Matter-ключи.
+```bash
+ymatter --config config.toml on
+ymatter --config config.toml off
+ymatter --config config.toml brightness 25
+ymatter --config config.toml color 210 80
+```
+
+Color Temperature отключена по умолчанию. Команда `MoveToColorTemperature` и диапазон объявлены устройством, но вызов через новый Python-клиент на реальном оборудовании ещё не проверялся. Включайте `[lamp].color_temp=true` только для отдельного контролируемого теста.
+
+### MQTT и Home Assistant
+
+После установки extra `mqtt` и настройки секций `[mqtt]`/`[bridge]`:
+
+```bash
+ymatter --config config.toml bridge
+```
+
+Bridge публикует MQTT Discovery и состояние с readback. Это **offline-tested** поведение; реальная долговременная Home Assistant-интеграция пока не подтверждена.
+
+## Статус проверок
+
+| Возможность | Статус |
+|---|---|
+| Реальный `maind` API, On/Off, brightness, Hue/Saturation | **CONFIRMED** исследовательскими контроллерами |
+| Полная read-only Matter-инвентаризация и rollback | **CONFIRMED** |
+| `ymatter` unit/integration tests | **70 PASS**, 4 Unix-shell tests были SKIP на Windows |
+| Управление реальной лампой через новый Python-клиент | **NOT TESTED** |
+| Color Temperature через `ymatter` | **OFFLINE TESTED / hardware NOT TESTED** |
+| Постоянно включённый API | **NOT SUPPORTED / unsafe by default** |
+| Реальный Home Assistant bridge | **NOT TESTED** |
+| Второй независимый Matter-контроллер | **NOT CONFIRMED** |
+
+Offline-тесты не заменяют аппаратную проверку. План одного ограниченного сеанса: [client/reports/REAL_CLIENT_TEST_PLAN.md](client/reports/REAL_CLIENT_TEST_PLAN.md).
+
+## Исследовательские инструменты
+
+[`scripts/`](scripts/) содержит актуальный lifecycle с:
+
+- уникальным `run_id` и каталогом `/tmp/maind-http-runs/<run_id>`;
+- global lock `/tmp/maind-http-runtime.lock`;
+- проверкой идентичности бинарников;
+- IPv4/IPv6 firewall guards;
+- независимым watchdog;
+- fail-closed preflight, rollback и `verify-clean`;
+- структурированной диагностикой отказов;
+- лимитами полной read-only инвентаризации.
+
+Эти скрипты рассчитаны на конкретную исследованную сборку и требуют явных параметров и confirmation tokens. После OTA или на другой модели сначала сравните бинарники, bind/auth model, configuration loader и supervisor behavior. Использование описано в [docs/USAGE.md](docs/USAGE.md).
+
+## Разработка
+
+```bash
+python -m pip install -e ./client
+python -m compileall -q client/src client/tests
+python -m unittest discover -s client/tests -t client -v
+ymatter --help
+```
+
+Research-тесты и CI не подключаются к реальным устройствам. Подробнее — [RELEASE_NOTES.md](RELEASE_NOTES.md) и [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Лицензия
+
+Apache-2.0, см. [LICENSE](LICENSE) и [NOTICE](NOTICE).

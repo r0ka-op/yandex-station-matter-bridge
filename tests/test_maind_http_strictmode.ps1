@@ -2,9 +2,9 @@
 param()
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version Latest
-$root=Split-Path -Parent $PSScriptRoot
+$root=Split-Path -Parent (Split-Path -Parent $PSCommandPath)
 . (Join-Path $root 'scripts\maind_http_target_helpers.ps1')
-Set-MaindHttpTarget -NodeId 258 -EndpointId 1
+Set-MaindHttpTarget -NodeId 4660 -EndpointId 1
 . (Join-Path $root 'scripts\maind_http_response_helpers.ps1')
 . (Join-Path $root 'scripts\maind_http_onoff_control_helpers.ps1')
 . (Join-Path $root 'scripts\maind_http_capability_helpers.ps1')

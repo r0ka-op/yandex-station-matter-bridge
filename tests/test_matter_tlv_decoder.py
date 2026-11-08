@@ -36,6 +36,14 @@ def main():
     assert structure["type"] == "structure"
     assert structure["children"][1]["value"] is True
 
+    assert decode("0x00ff")["elements"][0]["value"] == -1
+    assert decode("0x0c056c616d7021")["elements"][0]["value"] == "lamp!"
+    assert decode("0x10030102ff")["elements"][0]["value_hex"] == "0102ff"
+    assert decode("0x14")["elements"][0]["value"] is None
+    nested = decode("0x161510030102031818")["elements"][0]
+    assert nested["children"][0]["type"] == "structure"
+    assert nested["children"][0]["children"][0]["value_hex"] == "010203"
+
     for malformed in ("0x", "0x0", "0x16", "0x18", "0x1f", "0x0c05aa"):
         decode(malformed, success=False)
 
@@ -43,6 +51,8 @@ def main():
         "all_pass": True,
         "server_list_fixture": [29, 6, 8, 768],
         "malformed_rejected": 6,
+        "typed_scalars": ["boolean", "signed", "unsigned", "utf8", "bytes", "null"],
+        "nested_containers": True,
     }))
 
 

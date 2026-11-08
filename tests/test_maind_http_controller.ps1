@@ -5,9 +5,9 @@ param(
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
-$root = Split-Path -Parent $PSScriptRoot
+$root = Split-Path -Parent (Split-Path -Parent $PSCommandPath)
 . (Join-Path $root "scripts\maind_http_target_helpers.ps1")
-Set-MaindHttpTarget -NodeId 258 -EndpointId 1
+Set-MaindHttpTarget -NodeId 4660 -EndpointId 1
 . (Join-Path $root "scripts\maind_http_response_helpers.ps1")
 . (Join-Path $root "scripts\maind_http_onoff_control_helpers.ps1")
 
@@ -135,9 +135,9 @@ function Invoke-AllowlistedMockSequence(
                 $rawPath = Join-Path $OutputDirectory "$Name-devices.raw"
                 [IO.File]::WriteAllBytes($rawPath, $response.Bytes)
                 $rawSavedBeforeParse = Test-Path -LiteralPath $rawPath
-                $analysis = Get-MaindDevicesJsonAnalysis $response.Body 258
+                $analysis = Get-MaindDevicesJsonAnalysis $response.Body 4660
                 if (-not $analysis.Analysis.target_found) {
-                    throw "Matter Node ID 258 not found"
+                    throw "Matter Node ID 4660 not found"
                 }
                 continue
             }
@@ -177,7 +177,7 @@ $serverStart.UseShellExecute = $false
 $serverStart.CreateNoWindow = $true
 $serverStart.RedirectStandardOutput = $true
 $serverStart.RedirectStandardError = $true
-[void]$serverStart.ArgumentList.Add((Join-Path $root "tests\maind_http_mock_server.py"))
+[void]$serverStart.ArgumentList.Add((Join-Path $root "scripts\maind_http_mock_server.py"))
 [void]$serverStart.ArgumentList.Add("--port")
 [void]$serverStart.ArgumentList.Add([string]$port)
 $server = [Diagnostics.Process]::new()
@@ -222,7 +222,7 @@ try {
     $results.Add([pscustomobject]@{case='e2e_with_read_flag';result='PASS';status=200})
 
     $exactReadBody = Get-MaindOnOffReadRequestJson
-    Assert-True ($exactReadBody -ceq '{"nodeId":258,"endpointId":1,"clusterId":6,"attributeId":0}') "Exact read body changed"
+    Assert-True ($exactReadBody -ceq '{"nodeId":4660,"endpointId":1,"clusterId":6,"attributeId":0}') "Exact read body changed"
     Assert-True (Test-MaindHttpRequestAllowed -Method GET -Path /devices -RequestBody $null -ReadOnOffAttributeEnabled $false) "GET /devices denied without flag"
     Assert-True (Test-MaindHttpRequestAllowed -Method GET -Path /devices -RequestBody '' -ReadOnOffAttributeEnabled $true) "GET /devices denied in read mode"
     Assert-True (-not (Test-MaindHttpRequestAllowed -Method POST -Path /interaction/readAttribute -RequestBody $exactReadBody -ReadOnOffAttributeEnabled $false)) "readAttribute allowed without flag"
@@ -254,19 +254,19 @@ try {
 
     $arrayCase = Invoke-MockCase "valid_array" "/devices-array"
     Assert-MaindHttpResponse $arrayCase.Evidence $true
-    $arrayJson = Get-MaindDevicesJsonAnalysis $arrayCase.Body 258
-    Assert-True $arrayJson.Analysis.target_found "Node 258 missing from valid array JSON"
+    $arrayJson = Get-MaindDevicesJsonAnalysis $arrayCase.Body 4660
+    Assert-True $arrayJson.Analysis.target_found "Node 4660 missing from valid array JSON"
     Assert-True ($arrayJson.Analysis.root_kind -eq "array") "Array JSON root not detected"
     $results.Add([pscustomobject]@{case=$arrayCase.Name; result="PASS"; status=$arrayCase.Status})
 
     $wrapperCase = Invoke-MockCase "valid_other_structure" "/devices-wrapper"
     Assert-MaindHttpResponse $wrapperCase.Evidence $true
-    $wrapperJson = Get-MaindDevicesJsonAnalysis $wrapperCase.Body 258
-    Assert-True $wrapperJson.Analysis.target_found "Node 258 missing from wrapped JSON"
+    $wrapperJson = Get-MaindDevicesJsonAnalysis $wrapperCase.Body 4660
+    Assert-True $wrapperJson.Analysis.target_found "Node 4660 missing from wrapped JSON"
     Assert-True ($wrapperJson.Analysis.root_kind -eq "object") "Object JSON root not detected"
     $results.Add([pscustomobject]@{case=$wrapperCase.Name; result="PASS"; status=$wrapperCase.Status})
 
-    $readRequest = [ordered]@{nodeId=258; endpointId=1; clusterId=6; attributeId=0}
+    $readRequest = [ordered]@{nodeId=4660; endpointId=1; clusterId=6; attributeId=0}
     $readRequestJson = ConvertTo-Json -InputObject $readRequest -Compress
     $readCase = Invoke-MockPostCase `
         "read_attribute_exact_request" `
@@ -282,8 +282,8 @@ try {
 
     $noTargetCase = Invoke-MockCase "valid_json_without_target" "/devices-no-target"
     Assert-MaindHttpResponse $noTargetCase.Evidence $true
-    $noTargetJson = Get-MaindDevicesJsonAnalysis $noTargetCase.Body 258
-    Assert-True (-not $noTargetJson.Analysis.target_found) "Missing node 258 was reported as present"
+    $noTargetJson = Get-MaindDevicesJsonAnalysis $noTargetCase.Body 4660
+    Assert-True (-not $noTargetJson.Analysis.target_found) "Missing node 4660 was reported as present"
     Assert-True ($noTargetJson.Analysis.node_id_object_count -eq 1) "Node diagnostics were not retained"
     $results.Add([pscustomobject]@{case=$noTargetCase.Name; result="PASS"; status=$noTargetCase.Status})
 
@@ -308,7 +308,7 @@ try {
     $invalidCase = Invoke-MockCase "invalid_json" "/invalid-json"
     Assert-MaindHttpResponse $invalidCase.Evidence $true
     $invalidRejected = $false
-    try { [void](Get-MaindDevicesJsonAnalysis $invalidCase.Body 258) } catch { $invalidRejected = $true }
+    try { [void](Get-MaindDevicesJsonAnalysis $invalidCase.Body 4660) } catch { $invalidRejected = $true }
     Assert-True $invalidRejected "Invalid JSON was accepted"
     $results.Add([pscustomobject]@{case=$invalidCase.Name; result="PASS"; status=$invalidCase.Status})
 

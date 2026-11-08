@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ymatter-bridge"
+version = "0.1.1"
+description = "Клиент и MQTT-мост (Home Assistant) для встроенного Matter HTTP API Яндекс Станции: управление Эмби Лампой"
+readme = "README.md"
+authors = [{name = "r0ka-op"}]
+requires-python = ">=3.11"
+license = "Apache-2.0"
+dependencies = []
+
+[project.optional-dependencies]
+mqtt = ["paho-mqtt>=2.0"]
+
+[project.scripts]
+ymatter = "ymatter.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

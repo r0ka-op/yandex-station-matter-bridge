@@ -11,7 +11,7 @@ class Handler(BaseHTTPRequestHandler):
         devices_mode = self.headers.get("X-Mock-Devices-Mode", "valid")
         devices_routes = {
             "valid": (200, "application/json", json.dumps([
-                {"nodeId": 258, "endpoints": [0, 1]}
+                {"nodeId": 4660, "endpoints": [0, 1]}
             ]).encode()),
             "no-target": (200, "application/json", json.dumps([
                 {"nodeId": 999, "endpoints": [1]}
@@ -23,10 +23,10 @@ class Handler(BaseHTTPRequestHandler):
         }
         routes = {
             "/devices-array": (200, "application/json", json.dumps([
-                {"nodeId": 258, "endpoints": [1]}
+                {"nodeId": 4660, "endpoints": [1]}
             ]).encode()),
             "/devices-wrapper": (200, "application/json", json.dumps({
-                "result": {"devices": [{"nodeId": "0x0102"}]},
+                "result": {"devices": [{"nodeId": "0x1234"}]},
                 "metadata": {"schema": "wrapper"},
             }).encode()),
             "/devices-no-target": (200, "application/json", json.dumps({
@@ -66,7 +66,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/interaction/readAttribute":
             common_valid = (
                 set(request) == {"nodeId", "endpointId", "clusterId", "attributeId"}
-                and request["nodeId"] == 258
+                and request["nodeId"] == 4660
                 and request["endpointId"] == 1
             )
             if not common_valid:
@@ -111,7 +111,7 @@ class Handler(BaseHTTPRequestHandler):
             expected_keys = {"nodeId", "endpointId", "clusterId", "commandId", "fields"}
             common_valid = (
                 set(request) == expected_keys
-                and request["nodeId"] == 258
+                and request["nodeId"] == 4660
                 and request["endpointId"] == 1
             )
             if not common_valid:
