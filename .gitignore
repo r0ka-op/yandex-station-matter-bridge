@@ -1,0 +1,50 @@
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+build/
+dist/
+release/
+
+# Local configuration and credentials
+config.toml
+config.real-test.toml
+client/config.real-test.toml
+config.local.*
+*.local.toml
+*.local.psd1
+*.pem
+*.key
+*.p12
+*.pfx
+secrets.env
+.env
+
+# Runtime and research output
+results/
+captures/
+diagnostics/
+*.pcap
+*.pcapng
+*.tar
+*.tar.gz
+*.zip
+*.log
+
+# PowerShell / .NET test output
+scripts/mock_ssh_launcher/bin/
+scripts/mock_ssh_launcher/obj/
+TestResults/
+.test-*/
+
+# Editors and OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db

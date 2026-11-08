@@ -5,8 +5,8 @@ param(
     [Parameter(Mandatory=$true)][string]$SshAlias,
     [Parameter(Mandatory=$true)][string]$StationIPv4,
     [Parameter(Mandatory=$true)][string]$StationIPv6,
-    [Parameter(Mandatory=$true)][UInt64]$MatterNodeId,
-    [UInt16]$MatterEndpointId = 1,
+    [Parameter(Mandatory=$true)][ValidateRange(1,[UInt64]::MaxValue)][UInt64]$MatterNodeId,
+    [ValidateRange(0,65535)][UInt16]$MatterEndpointId=1,
     [switch]$StagingOnly,
     [switch]$ReadOnOffAttribute,
     [switch]$ReadLightStateVerification,
@@ -19,6 +19,13 @@ param(
     [switch]$InternalVisualBrightnessControl,
     [switch]$InternalColorControl,
     [switch]$InternalVisualColorControl,
+    [switch]$InternalFullInventory,
+    [UInt64]$InventoryTargetNodeId=0,
+    [ValidateRange(1,5000)][int]$InventoryMaxRequests=1000,
+    [ValidateRange(1024,4194304)][int]$InventoryMaxResponseBytes=1048576,
+    [ValidateRange(1048576,268435456)][long]$InventoryMaxTotalBytes=67108864,
+    [ValidateRange(0,5000)][int]$InventoryRequestDelayMs=150,
+    [ValidateRange(60,1800)][int]$InventoryMaxSessionSeconds=600,
     [string]$LightControlConfirmToken,
     [switch]$AllowTemporaryOn,
     [string]$TemporaryOnConfirmToken
@@ -39,6 +46,7 @@ Set-MaindHttpTarget -NodeId $MatterNodeId -EndpointId $MatterEndpointId
 . (Join-Path $root "scripts\maind_http_capability_helpers.ps1")
 . (Join-Path $root "scripts\maind_http_light_control_helpers.ps1")
 . (Join-Path $root "scripts\maind_http_light_state_verification_helpers.ps1")
+. (Join-Path $root "scripts\maind_http_inventory_helpers.ps1")
 $controlEnabled = [bool]$InternalOnOffControl.IsPresent
 $capabilityEnabled = [bool]$CapabilityDiscovery.IsPresent
 $vendorDiscoveryEnabled = [bool]$VendorColorMusicDiscovery.IsPresent
@@ -46,6 +54,9 @@ $brightnessEnabled = [bool]$InternalBrightnessControl.IsPresent
 $visualBrightnessEnabled = [bool]$InternalVisualBrightnessControl.IsPresent
 $colorEnabled = [bool]$InternalColorControl.IsPresent
 $visualColorEnabled = [bool]$InternalVisualColorControl.IsPresent
+$inventoryEnabled = [bool]$InternalFullInventory.IsPresent
+if($InventoryTargetNodeId -eq 0){$InventoryTargetNodeId=$MatterNodeId}
+$inventoryContext = if($inventoryEnabled){New-MaindInventoryContext -NodeId $InventoryTargetNodeId}else{$null}
 $lightMode = if ($brightnessEnabled) {'brightness'} elseif ($colorEnabled) {'color'} else {$null}
 $lightControlEnabled = [bool]($brightnessEnabled -or $colorEnabled)
 $lightStateVerificationEnabled = [bool]$ReadLightStateVerification.IsPresent
@@ -84,7 +95,7 @@ if ($AllowTemporaryOn -and (-not $lightControlEnabled -or
 }
 $selectedModeCount = [int]$controlEnabled + [int]$ReadOnOffAttribute.IsPresent +
     [int]$lightStateVerificationEnabled + [int]$capabilityEnabled + [int]$vendorDiscoveryEnabled +
-    [int]$brightnessEnabled + [int]$colorEnabled
+    [int]$brightnessEnabled + [int]$colorEnabled + [int]$inventoryEnabled
 if ($selectedModeCount -gt 1) {
     throw 'Runtime experiment modes are mutually exclusive.'
 }
@@ -92,7 +103,10 @@ $readOnOffEnabled = [bool]($ReadOnOffAttribute.IsPresent -or $controlEnabled)
 $httpRequestPlan = @(Get-MaindHttpReadOnlyRequestPlan `
     -ReadOnOffAttributeEnabled $readOnOffEnabled)
 foreach ($plannedRequest in $httpRequestPlan) {
-    if ($lightStateVerificationEnabled) {
+    if ($inventoryEnabled) {
+        Assert-MaindInventoryRequestAllowed -Context $inventoryContext -Method $plannedRequest.method `
+            -Path $plannedRequest.path -RequestBody $plannedRequest.body
+    } elseif ($lightStateVerificationEnabled) {
         Assert-MaindLightStateVerificationRequestAllowed -Method $plannedRequest.method `
             -Path $plannedRequest.path -RequestBody $plannedRequest.body
     } elseif ($capabilityEnabled -or $vendorDiscoveryEnabled) {
@@ -113,18 +127,17 @@ foreach ($plannedRequest in $httpRequestPlan) {
             -ReadOnOffAttributeEnabled $readOnOffEnabled
     }
 }
+$runStamp = Get-Date -Format "yyyyMMdd-HHmmss-fff"
+$runId = "run-$([DateTime]::UtcNow.ToString('yyyyMMddTHHmmssfffZ'))-$(([Guid]::NewGuid().ToString('N')).Substring(0,12))"
 $remoteScript = Join-Path $root "scripts\maind_http_runtime_test_remote.sh"
 $ssh = Join-Path $env:WINDIR "System32\OpenSSH\ssh.exe"
 $remotePath = if ($StagingOnly) {
-    "/tmp/maind_http_runtime_test_remote.sh.staging-test"
+    "/tmp/maind_http_runtime_test_remote.$runId.staging-test.sh"
 } else {
-    "/tmp/maind_http_runtime_test_remote.sh"
+    "/tmp/maind_http_runtime_test_remote.$runId.sh"
 }
-$remoteBase = if ($lightStateVerificationEnabled) {'/tmp/maind-http-read-verify'} else {'/tmp/maind-http-test'}
-$remoteTargetEnvironment="MAIND_MATTER_NODE_ID=$MatterNodeId MAIND_MATTER_ENDPOINT_ID=$MatterEndpointId"
-$remoteHelperCommand = if ($lightStateVerificationEnabled) {
-    "$remoteTargetEnvironment MAIND_HTTP_BASE=/tmp/maind-http-read-verify '$remotePath'"
-} else { "$remoteTargetEnvironment '$remotePath'" }
+$remoteBase = "/tmp/maind-http-runs/$runId"
+$remoteHelperCommand = "MAIND_HTTP_RUN_ID=$runId MAIND_HTTP_BASE=$remoteBase MAIND_HTTP_NODE_ID=$MatterNodeId MAIND_HTTP_ENDPOINT_ID=$MatterEndpointId '$remotePath'"
 $stagingAttempted = $false
 $helperUploaded = $false
 $helperValidated = $false
@@ -137,13 +150,73 @@ $lightInitialOnOff = $null
 $lightInitialLevel = $null
 $lightMutationMayHaveOccurred = $false
 $visualColorRestoreLevel = -1
-$runStamp = Get-Date -Format "yyyyMMdd-HHmmss-fff"
-$resultDir = Join-Path $root "results\runtime\maind-http-$runStamp"
+$resultDir = if($inventoryEnabled){
+    Join-Path $root "results\private\inventory-$runStamp"
+}else{
+    Join-Path $root "results\runtime\maind-http-$runStamp"
+}
 New-Item -ItemType Directory -Path $resultDir -Force | Out-Null
+[ordered]@{run_id=$runId;remote_base=$remoteBase;remote_helper=$remotePath;created_utc=[DateTime]::UtcNow.ToString('o')} |
+    ConvertTo-Json | Set-Content -Encoding UTF8 (Join-Path $resultDir 'run_identity.json')
 
 function Invoke-Ssh([string]$Command) {
     & $ssh -o BatchMode=yes -o ConnectTimeout=10 $SshAlias $Command
     if ($LASTEXITCODE -ne 0) { throw "SSH command failed: $Command" }
+}
+
+function Invoke-SshCaptured([string]$Command) {
+    $psi=[Diagnostics.ProcessStartInfo]::new()
+    $psi.FileName=$ssh
+    $psi.UseShellExecute=$false
+    $psi.CreateNoWindow=$true
+    $psi.RedirectStandardOutput=$true
+    $psi.RedirectStandardError=$true
+    foreach($argument in @('-o','BatchMode=yes','-o','ConnectTimeout=10',$SshAlias,$Command)){
+        [void]$psi.ArgumentList.Add($argument)
+    }
+    $process=[Diagnostics.Process]::new();$process.StartInfo=$psi
+    if(-not$process.Start()){throw 'Could not start captured SSH command'}
+    try{
+        $stdoutTask=$process.StandardOutput.ReadToEndAsync()
+        $stderrTask=$process.StandardError.ReadToEndAsync()
+        if(-not$process.WaitForExit(30000)){
+            $process.Kill($true);$process.WaitForExit()
+            throw 'Captured SSH command timed out after 30 seconds'
+        }
+        [pscustomobject]@{
+            exit_code=$process.ExitCode
+            stdout=$stdoutTask.GetAwaiter().GetResult()
+            stderr=$stderrTask.GetAwaiter().GetResult()
+        }
+    }finally{$process.Dispose()}
+}
+
+function ConvertFrom-LifecycleRefusal([string]$Stdout,[string]$Stderr,[int]$ExitCode){
+    $combined=($Stdout+"`n"+$Stderr)
+    $line=@($combined -split '\r?\n'|Where-Object{$_-like'*MAIND_PREFLIGHT_REFUSAL|*'}|Select-Object -Last 1)
+    if($line.Count-eq0){
+        return [pscustomobject][ordered]@{
+            parsed=$false;exit_code=$ExitCode;code='PF_UNSTRUCTURED_REMOTE_FAILURE'
+            stage='remote_preflight';condition='unknown';system_changed='unknown'
+            action='inspect_lifecycle_preflight_json'
+            detail=(($combined.Trim()) -replace '[\r\n]+','; ')
+        }
+    }
+    $payload=$line[0].Substring($line[0].IndexOf('MAIND_PREFLIGHT_REFUSAL|'))
+    $values=@{}
+    foreach($part in $payload.Split('|')|Select-Object -Skip 1){
+        $separator=$part.IndexOf('=')
+        if($separator-gt0){$values[$part.Substring(0,$separator)]=$part.Substring($separator+1)}
+    }
+    [pscustomobject][ordered]@{
+        parsed=$true;exit_code=$ExitCode
+        code=if($values.ContainsKey('code')){$values.code}else{'PF_MALFORMED_STRUCTURED_FAILURE'}
+        stage=if($values.ContainsKey('stage')){$values.stage}else{'unknown'}
+        condition=if($values.ContainsKey('condition')){$values.condition}else{'unknown'}
+        system_changed=if($values.ContainsKey('system_changed')){$values.system_changed}else{'unknown'}
+        action=if($values.ContainsKey('action')){$values.action}else{'inspect_raw_preflight'}
+        detail=if($values.ContainsKey('detail')){$values.detail}else{'missing_detail'}
+    }
 }
 
 function Send-FileOverSshStdin([string]$LocalPath, [string]$RemoteTarget) {
@@ -332,9 +405,13 @@ function Invoke-RemoteLoopbackHttpRequest(
     [AllowNull()][string]$LightControlMode = $null,
     [bool]$TemporaryOnAllowed = $false,
     [bool]$VisualColorControl = $false,
-    [int]$VisualColorRestoreLevel = -1
+    [int]$VisualColorRestoreLevel = -1,
+    [AllowNull()]$InventoryContext=$null,
+    [int]$MaxBodyBytes=1048576
 ) {
-    if ($LightStateVerificationEnabled) {
+    if($null-ne$InventoryContext){
+        Assert-MaindInventoryRequestAllowed -Context $InventoryContext -Method $Method -Path $Path -RequestBody $RequestBody
+    } elseif ($LightStateVerificationEnabled) {
         Assert-MaindLightStateVerificationRequestAllowed -Method $Method -Path $Path `
             -RequestBody $RequestBody
     } elseif ($LightControlMode) {
@@ -400,11 +477,21 @@ function Invoke-RemoteLoopbackHttpRequest(
         try {
             $bodyCopyTask=$process.StandardOutput.BaseStream.CopyToAsync($bodyStream)
             $processTimeoutMs=($TimeoutSec+15)*1000
-            if(-not $process.WaitForExit($processTimeoutMs)){
-                $process.Kill($true);$process.WaitForExit()
-                throw "SSH/wget request exceeded controller deadline of $processTimeoutMs ms"
+            $deadline=[DateTime]::UtcNow.AddMilliseconds($processTimeoutMs)
+            while(-not$bodyCopyTask.IsCompleted){
+                if($bodyStream.Length-gt$MaxBodyBytes){
+                    $process.Kill($true);$process.WaitForExit()
+                    throw "HTTP response exceeded per-response limit of $MaxBodyBytes bytes"
+                }
+                if([DateTime]::UtcNow-ge$deadline){
+                    $process.Kill($true);$process.WaitForExit()
+                    throw "SSH/wget request exceeded controller deadline of $processTimeoutMs ms"
+                }
+                Start-Sleep -Milliseconds 50
             }
             [void]$bodyCopyTask.GetAwaiter().GetResult()
+            $process.WaitForExit()
+            if($bodyStream.Length-gt$MaxBodyBytes){throw "HTTP response exceeded per-response limit of $MaxBodyBytes bytes"}
         } finally { $bodyStream.Dispose() }
         $completed = [DateTime]::UtcNow
         $stderr = $stderrTask.GetAwaiter().GetResult()
@@ -582,13 +669,6 @@ printf 'size=%s\nsha256=%s\nshell_check=pass\n' "`$size" "`$hash"
     Write-Host "STAGING_VERIFIED`n$stagingEvidence"
 
     if ($StagingOnly) {
-        & $ssh -o BatchMode=yes -o ConnectTimeout=10 $SshAlias "test -d /tmp/maind-http-test"
-        if ($LASTEXITCODE -eq 0) {
-            Receive-DirectoryOverSshTar "/tmp/maind-http-test" $resultDir
-            Write-Host "TAR_RETRIEVAL_VERIFIED"
-        } else {
-            Write-Host "TAR_RETRIEVAL_SKIPPED=no_remote_failure_log_directory"
-        }
         Invoke-Ssh "rm -f '$remotePath'; [ ! -e '$remotePath' ]"
         $helperUploaded = $false
         Write-Host "STAGING_TEST_CLEANUP=PASS"
@@ -607,7 +687,22 @@ printf 'size=%s\nsha256=%s\nshell_check=pass\n' "`$size" "`$hash"
         ssh_local_forwarding = "unsupported_by_dropbear_policy"
     } | ConvertTo-Json | Set-Content -Encoding UTF8 (Join-Path $resultDir "http_transport_preflight.json")
 
-    $activationCommandIssued = $true
+    $lifecycleResult=Invoke-SshCaptured "$remoteHelperCommand preflight $requiredToken"
+    $lifecyclePreflight=$lifecycleResult.stdout.Trim()
+    [ordered]@{exit_code=$lifecycleResult.exit_code;stdout=$lifecycleResult.stdout;stderr=$lifecycleResult.stderr;
+        run_id=$runId;remote_base=$remoteBase}|ConvertTo-Json -Depth 4|Set-Content -Encoding UTF8 `
+        (Join-Path $resultDir 'lifecycle_preflight.json')
+    ($lifecycleResult.stdout+$lifecycleResult.stderr)|Set-Content -Encoding UTF8 `
+        (Join-Path $resultDir 'lifecycle_preflight.txt')
+    if($lifecycleResult.exit_code-ne0){
+        $refusal=ConvertFrom-LifecycleRefusal $lifecycleResult.stdout $lifecycleResult.stderr $lifecycleResult.exit_code
+        $refusal|ConvertTo-Json -Depth 4|Set-Content -Encoding UTF8 `
+            (Join-Path $resultDir 'lifecycle_preflight_failure.json')
+        throw "Remote lifecycle preflight refused run: code=$($refusal.code) stage=$($refusal.stage) condition=$($refusal.condition) system_changed=$($refusal.system_changed) detail=$($refusal.detail) action=$($refusal.action) exit=$($refusal.exit_code)."
+    }
+    if($lifecyclePreflight -notmatch "preflight=clean run_id=$([regex]::Escape($runId))"){
+        throw 'Remote lifecycle preflight did not return clean ownership evidence.'
+    }
     if ($lightStateVerificationEnabled) {
         $oldMarkerEvidence=(Invoke-Ssh @'
 set -eu
@@ -624,36 +719,15 @@ done
 '@ | Out-String).Trim()
         $oldMarkerEvidence | Set-Content -Encoding UTF8 `
             (Join-Path $resultDir 'old_light_markers.before.txt')
-        if ($oldMarkerEvidence -notmatch '(?m)^LIGHT_STATE_MAY_BE_CHANGED\|present\|' -or
-            $oldMarkerEvidence -notmatch '(?m)^light\.restore\.armed\|present\|') {
-            throw 'Required old diagnostic markers are absent; refusing to overwrite historical evidence.'
-        }
-        # Preserve the historical directory before activation using the same
-        # binary-safe SSH/TAR transport as runtime diagnostics, then compare
-        # the locally stored marker bytes with the remote SHA-256 evidence.
-        Receive-DirectoryOverSshTar '/tmp/maind-http-test' $resultDir
-        $localMarkerLines=[Collections.Generic.List[string]]::new()
-        foreach($name in @('LIGHT_STATE_MAY_BE_CHANGED','light.restore.armed','light.restore.state')){
-            $localPath=Join-Path (Join-Path $resultDir 'maind-http-test') $name
-            $remoteLine=@($oldMarkerEvidence -split "`r?`n" | Where-Object {$_ -like "$name|*"})
-            if($remoteLine.Count -ne 1){throw "Remote marker evidence is ambiguous for $name"}
-            $parts=$remoteLine[0].Split('|')
-            if($parts[1] -eq 'present'){
-                if(-not (Test-Path -LiteralPath $localPath -PathType Leaf)){throw "Backed-up marker is missing: $name"}
-                $localSize=(Get-Item -LiteralPath $localPath).Length
-                $localHash=(Get-FileHash -Algorithm SHA256 -LiteralPath $localPath).Hash.ToLowerInvariant()
-                if([string]$localSize -cne $parts[2] -or $localHash -cne $parts[3]){
-                    throw "Backed-up marker checksum mismatch: $name"
-                }
-                $localMarkerLines.Add("$name|present|$localSize|$localHash")
-            } elseif(Test-Path -LiteralPath $localPath){
-                throw "Unexpected backed-up marker: $name"
-            } else {$localMarkerLines.Add("$name|absent|-|-")}
-        }
-        $localMarkerLines|Set-Content -Encoding UTF8 `
+        # A unique run directory can no longer overwrite historical markers.
+        # If legacy evidence is present the lifecycle preflight blocks before
+        # this point; when absent, record that fact without creating it.
+        $oldMarkerEvidence|Set-Content -Encoding UTF8 `
             (Join-Path $resultDir 'old_light_markers.local_verified.txt')
     }
-    Invoke-Ssh "$remoteHelperCommand arm $requiredToken"
+    $watchdogSeconds=if($inventoryEnabled){[Math]::Min(3600,$InventoryMaxSessionSeconds+180)}else{360}
+    $activationCommandIssued = $true
+    Invoke-Ssh "$remoteHelperCommand arm $requiredToken $watchdogSeconds"
 
     # A LAN path must fail before any loopback request is allowed.
     $ipv4 = [System.Net.IPAddress]::Parse($StationIPv4)
@@ -683,11 +757,12 @@ done
         -CapabilityDiscoveryEnabled ($capabilityEnabled -or $vendorDiscoveryEnabled) `
         -LightStateVerificationEnabled $lightStateVerificationEnabled `
         -LightControlMode $lightMode `
-        -TemporaryOnAllowed ([bool]$AllowTemporaryOn)
+        -TemporaryOnAllowed ([bool]$AllowTemporaryOn) `
+        -InventoryContext $inventoryContext `
+        -MaxBodyBytes $InventoryMaxResponseBytes
     $devicesBody = $devicesResponse.Body
     try {
-        $devicesResult = Get-MaindDevicesJsonAnalysis -JsonText $devicesBody `
-            -TargetNodeId $MatterNodeId -TargetEndpointId $MatterEndpointId
+        $devicesResult = Get-MaindDevicesJsonAnalysis -JsonText $devicesBody -TargetNodeId $InventoryTargetNodeId
         ConvertTo-Json -InputObject $devicesResult.Parsed -Depth 30 |
             Set-Content -Encoding UTF8 (Join-Path $resultDir "devices.json")
         $devicesResult.Analysis | ConvertTo-Json -Depth 30 |
@@ -697,7 +772,7 @@ done
         $jsonError | Set-Content -Encoding UTF8 (Join-Path $resultDir "devices_json_error.txt")
         [ordered]@{
             parse_success = $false
-            target_node_id = $MatterNodeId
+            target_node_id = $InventoryTargetNodeId
             error = $_.Exception.Message
             raw_body_file = "http_devices.body"
         } | ConvertTo-Json -Depth 5 |
@@ -705,13 +780,28 @@ done
         throw "GET /devices returned HTTP 2xx with a non-empty but invalid JSON body; see devices_json_error.txt"
     }
     if (-not $devicesResult.Analysis.target_found) {
-        throw "GET /devices returned valid JSON, but Matter Node ID $MatterNodeId was not found; see devices_structure.json"
+        throw "GET /devices returned valid JSON, but target Matter Node ID $InventoryTargetNodeId was not found; see devices_structure.json"
     }
-    if (-not $devicesResult.Analysis.target_endpoint_found) {
-        throw "GET /devices found Matter Node ID $MatterNodeId, but endpoint $MatterEndpointId was not advertised; see devices_structure.json"
+    if (-not $inventoryEnabled -and -not $devicesResult.Analysis.target_endpoint_found) {
+        throw "GET /devices found Matter Node ID $InventoryTargetNodeId, but no usable endpoint was advertised; see devices_structure.json"
     }
 
-    if ($capabilityEnabled) {
+    if($inventoryEnabled){
+        $inventoryResult=Invoke-MaindFullInventory -Context $inventoryContext `
+            -DevicesResult $devicesResult -ResultDirectory $resultDir -Root $root `
+            -MaxRequests $InventoryMaxRequests -MaxTotalBytes $InventoryMaxTotalBytes `
+            -RequestDelayMs $InventoryRequestDelayMs -MaxSessionSeconds $InventoryMaxSessionSeconds `
+            -ReadAttribute {
+                param($endpoint,$cluster,$attribute,$evidence)
+                $request=Get-MaindInventoryReadJson -NodeId $InventoryTargetNodeId `
+                    -EndpointId $endpoint -ClusterId $cluster -AttributeId $attribute
+                Invoke-RemoteLoopbackHttpRequest -Method POST -Path '/interaction/readAttribute' `
+                    -EvidenceName $evidence -RequestBody $request -TimeoutSec 20 -RequireSuccess $true `
+                    -InventoryContext $inventoryContext -MaxBodyBytes $InventoryMaxResponseBytes
+            }
+        ConvertTo-Json -InputObject @($inventoryResult.errors) -Depth 20|Set-Content -Encoding UTF8 `
+            (Join-Path $resultDir 'errors.json')
+    } elseif ($capabilityEnabled) {
         $descriptor = Invoke-CapabilityAttributeRead `
             -ClusterId 29 -AttributeId 1 -EvidenceName 'descriptor_server_list'
         if (-not $descriptor.supported) {
@@ -1147,7 +1237,7 @@ done
                 -ReadOnOffAttributeEnabled $true -OnOffControlEnabled $true
             try {
                 $changeParsed = Assert-MaindInvokeSucceeded $changeResponse.Body `
-                    -ExpectedEndpointId $MatterEndpointId -ExpectedClusterId 6 -ExpectedCommandId $changeCommandId
+                    -ExpectedEndpointId 1 -ExpectedClusterId 6 -ExpectedCommandId $changeCommandId
                 $changeParsed | ConvertTo-Json -Depth 30 | Set-Content -Encoding UTF8 `
                     (Join-Path $resultDir 'invoke_change.parsed.json')
             } catch {
@@ -1173,7 +1263,7 @@ done
                 -TimeoutSec 30 -RequireSuccess $true `
                 -ReadOnOffAttributeEnabled $true -OnOffControlEnabled $true
             [void](Assert-MaindInvokeSucceeded $restoreResponse.Body `
-                -ExpectedEndpointId $MatterEndpointId -ExpectedClusterId 6 -ExpectedCommandId $restoreCommandId)
+                -ExpectedEndpointId 1 -ExpectedClusterId 6 -ExpectedCommandId $restoreCommandId)
             $afterRestoreRead = Invoke-RemoteLoopbackHttpRequest `
                 -Method 'POST' -Path '/interaction/readAttribute' `
                 -EvidenceName 'http_read_after_restore' `
@@ -1200,7 +1290,9 @@ done
             Set-Content -Encoding UTF8 (Join-Path $resultDir "read_attribute_deferred.txt")
     }
 
-    $completionReason = if ($controlEnabled) {
+    $completionReason = if($inventoryEnabled){
+        'completed_read_only_full_inventory'
+    } elseif ($controlEnabled) {
         'completed_control_change_and_verified_restore'
     } elseif ($lightControlEnabled) {
         "completed_${lightMode}_change_and_verified_restore"
@@ -1215,7 +1307,11 @@ done
     }
     Invoke-Ssh "$remoteHelperCommand rollback $completionReason"
     Invoke-Ssh "$remoteHelperCommand verify-clean"
-    Invoke-Ssh "$remoteHelperCommand status" | Set-Content -Encoding UTF8 (Join-Path $resultDir "final_status.txt")
+    $finalStatus=(Invoke-Ssh "$remoteHelperCommand status"|Out-String)
+    $finalStatus|Set-Content -Encoding UTF8 (Join-Path $resultDir "final_status.txt")
+    if($inventoryEnabled){
+        [ordered]@{verified_clean=($finalStatus-match'completed=yes'-and$finalStatus-match'guard4=no'-and$finalStatus-match'guard6=no'-and$finalStatus-match'patch_mount=no');raw_status_file='final_status.txt';completed_utc=[DateTime]::UtcNow.ToString('o')}|ConvertTo-Json|Set-Content -Encoding UTF8 (Join-Path $resultDir 'postflight.json')
+    }
     if($lightStateVerificationEnabled){
         $oldMarkerAfter=(Invoke-Ssh @'
 set -eu
@@ -1274,7 +1370,7 @@ done
                 -RequestBody $emergencyBody -TimeoutSec 30 -RequireSuccess $true `
                 -ReadOnOffAttributeEnabled $true -OnOffControlEnabled $true
             [void](Assert-MaindInvokeSucceeded $emergencyResponse.Body `
-                -ExpectedEndpointId $MatterEndpointId -ExpectedClusterId 6 -ExpectedCommandId $emergencyCommandId)
+                -ExpectedEndpointId 1 -ExpectedClusterId 6 -ExpectedCommandId $emergencyCommandId)
             $emergencyRead = Invoke-RemoteLoopbackHttpRequest `
                 -Method 'POST' -Path '/interaction/readAttribute' `
                 -EvidenceName 'http_read_emergency_restore' `
@@ -1320,7 +1416,7 @@ done
         if ($lightControlEnabled) {
             try {
                 & $ssh -o BatchMode=yes $SshAlias `
-                    "test ! -f /tmp/maind-http-test/LIGHT_STATE_MAY_BE_CHANGED"
+                    "test ! -f '$remoteBase/LIGHT_STATE_MAY_BE_CHANGED'"
                 if ($LASTEXITCODE -ne 0) {
                     [ordered]@{restoration_verified=$false;possible_lamp_state_changed=$true;
                         mode=$lightMode}|ConvertTo-Json|Set-Content -Encoding UTF8 `

@@ -2,9 +2,9 @@
 param()
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version Latest
-$root=Split-Path -Parent $PSScriptRoot
+$root=Split-Path -Parent (Split-Path -Parent $PSCommandPath)
 . (Join-Path $root 'scripts\maind_http_target_helpers.ps1')
-Set-MaindHttpTarget -NodeId 258 -EndpointId 1
+Set-MaindHttpTarget -NodeId 4660 -EndpointId 1
 . (Join-Path $root 'scripts\maind_http_light_state_verification_helpers.ps1')
 . (Join-Path $root 'scripts\maind_http_response_helpers.ps1')
 . (Join-Path $root 'scripts\maind_http_capability_helpers.ps1')
@@ -20,12 +20,12 @@ $levelJson=Get-MaindLightStateVerificationReadJson 8
 Assert-True (Test-MaindLightStateVerificationRequestAllowed POST /interaction/readAttribute $onJson) 'OnOff read rejected'
 Assert-True (Test-MaindLightStateVerificationRequestAllowed POST /interaction/readAttribute $levelJson) 'level read rejected'
 foreach($bad in @(
-    @{m='POST';p='/interaction/invokeCommand';b='{"nodeId":258,"endpointId":1,"clusterId":6,"commandId":0,"fields":{}}'},
+    @{m='POST';p='/interaction/invokeCommand';b='{"nodeId":4660,"endpointId":1,"clusterId":6,"commandId":0,"fields":{}}'},
     @{m='POST';p='/interaction/writeAttribute';b='{}'},
     @{m='GET';p='/';b=$null},
-    @{m='POST';p='/interaction/readAttribute';b='{"nodeId":258,"endpointId":1,"clusterId":768,"attributeId":0}'},
+    @{m='POST';p='/interaction/readAttribute';b='{"nodeId":4660,"endpointId":1,"clusterId":768,"attributeId":0}'},
     @{m='POST';p='/interaction/readAttribute';b='{"nodeId":259,"endpointId":1,"clusterId":6,"attributeId":0}'},
-    @{m='POST';p='/interaction/readAttribute';b='{"nodeId":258,"endpointId":2,"clusterId":6,"attributeId":0}'},
+    @{m='POST';p='/interaction/readAttribute';b='{"nodeId":4660,"endpointId":2,"clusterId":6,"attributeId":0}'},
     @{m='POST';p='/interaction/readAttribute';b='not-json'}
 )){
     Assert-False (Test-MaindLightStateVerificationRequestAllowed $bad.m $bad.p $bad.b) "unsafe request allowed: $($bad.m) $($bad.p)"

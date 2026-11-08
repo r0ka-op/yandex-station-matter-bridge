@@ -4,13 +4,13 @@
 
 ## [Unreleased]
 
-### Community review snapshot
+### Integrated client and current lifecycle
 
-- Указан автор r0ka-op, добавлены NOTICE, краткое описание находки и безопасные примеры HTTP.
-- Сборка архива переведена на явный allowlist исходников.
-- Удалённые mutating entry points старой версии заблокированы; аппаратная работа требует переноса актуального lifecycle.
-- Исправлен известный недостающий `return 1` в preflight старой версии (защита остаётся заблокированной).
-- Пример проекта .NET переведён на net8.0 для соответствия требованиям документации.
+- Добавлен Python-клиент `ymatter` в `client/`, MQTT bridge и Home Assistant Discovery.
+- Перенесён актуальный lifecycle с `run_id`, global lock, structured preflight diagnostics, watchdog и `verify-clean`.
+- Добавлена полная read-only инвентаризация и обезличенная сводка её реальных результатов.
+- Приватные адреса, идентификаторы и runtime-артефакты исключены; Node ID и endpoint задаются явно.
+- Устаревшие release-документы перенесены в `docs/archive/`.
 
 
 ### Added

@@ -31,12 +31,12 @@ def build_isolated(production: pathlib.Path) -> str:
     text = production.read_text(encoding="utf-8")
     text = replace_once(
         text,
-        "/tmp/maind-http-test|/tmp/maind-http-read-verify) ;;",
-        "/tmp/maind-http-test|/tmp/maind-http-read-verify|/tmp/maind-http-watchdog-audit-*/case-*) ;;",
-        "BASE allowlist",
+        'RUN_ROOT="/tmp/maind-http-runs"',
+        'RUN_ROOT="${MAIND_TEST_RUN_ROOT:?}"',
+        "isolated run root",
     )
+    text = replace_once(text, 'LOCK_DIR="/tmp/maind-http-runtime.lock"', 'LOCK_DIR="$RUN_ROOT/.lock"', "isolated lock")
     text = replace_once(text, 'PATCH_MOUNT="/data/quasar/quasar_patches"', 'PATCH_MOUNT="$BASE/mock-patch-mount"', "patch mount")
-    text = replace_once(text, "WATCHDOG_SECONDS=360", 'WATCHDOG_SECONDS="${MAIND_TEST_WATCHDOG_SECONDS:-360}"', "deadline")
     if text.count("/usr/bin/wget") != 3:
         raise RuntimeError("expected exactly three production wget calls")
     text = text.replace("/usr/bin/wget", '"$BASE/mock-bin/wget"')
@@ -56,9 +56,10 @@ save_mount_diagnostics() { log "isolated mount diagnostics $1"; }
 health_snapshot() { printf 'isolated=yes\n' > "$BASE/$1.snapshot"; }
 remove_guards_if_safe() { log "isolated guards unchanged"; }
 mock_platformd_signal() { : > "$BASE/FORBIDDEN_PLATFORMD_SIGNAL"; return 1; }
+legacy_state_present() { return 1; }
 '''
     text = replace_once(text, marker, overrides + marker, "override injection")
-    forbidden = ["/usr/bin/wget", 'PATCH_MOUNT="/data/quasar/quasar_patches"', 'kill -TERM "$old"']
+    forbidden = ["/usr/bin/wget", 'PATCH_MOUNT="/data/quasar/quasar_patches"', 'kill -TERM "$old"', 'LOCK_DIR="/tmp/maind-http-runtime.lock"']
     for token in forbidden:
         if token in text:
             raise RuntimeError(f"unsafe token remains: {token}")
@@ -67,7 +68,7 @@ mock_platformd_signal() { : > "$BASE/FORBIDDEN_PLATFORMD_SIGNAL"; return 1; }
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--ssh-alias", required=True)
+    ap.add_argument("--ssh-alias", default="mock-station")
     ap.add_argument("--output", required=True)
     args = ap.parse_args()
     root = pathlib.Path(__file__).resolve().parents[1]
@@ -78,8 +79,8 @@ def main() -> int:
     transformed = build_isolated(production)
     files = {
         "production-watchdog-isolated.sh": transformed.encode(),
-        "mock-wget": (root / "tests" / "watchdog_isolated_mock_wget.sh").read_bytes(),
-        "runner.sh": (root / "tests" / "watchdog_isolated_busybox_runner.sh").read_bytes(),
+        "mock-wget": (root / "scripts" / "watchdog_isolated_mock_wget.sh").read_bytes(),
+        "runner.sh": (root / "scripts" / "watchdog_isolated_busybox_runner.sh").read_bytes(),
     }
     manifest = {name: hashlib.sha256(data).hexdigest() for name, data in files.items()}
     result: dict[str, object] = {"remote": remote, "staged_sha256": manifest}

@@ -1,5 +1,6 @@
-Yandex Station Matter HTTP API
+Yandex Station Matter HTTP API and ymatter
 Copyright 2026 r0ka-op
 
-Original project code and documentation by r0ka-op.
-This project is independent of Yandex and does not include Yandex firmware.
+Created and maintained by r0ka-op (https://github.com/r0ka-op).
+This project is independent of Yandex and does not include Yandex firmware,
+private Matter credentials, certificates, or device dumps.

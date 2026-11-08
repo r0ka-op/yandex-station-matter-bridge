@@ -1,7 +1,7 @@
 # Source release builder: strict allowlist. Never recursively copy the entire workspace.
 [CmdletBinding()]
 param(
-    [string]$Version = '0.1.0-review',
+    [string]$Version = '0.1.1-review',
     [string]$OutputDirectory
 )
 $ErrorActionPreference = 'Stop'
@@ -17,15 +17,23 @@ New-Item -ItemType Directory -Force -Path $stage | Out-Null
 
 # Only these source paths are eligible. Secrets, results, local configuration,
 # generated obj/bin files and unreviewed additions are NEVER included by default.
-$rootFiles = @('.gitignore', 'README.md', 'LICENSE', 'NOTICE',
-    'CHANGELOG.md', 'CONTRIBUTING.md', 'SECURITY.md')
+$rootFiles = @('.gitignore', '.gitattributes', 'README.md', 'LICENSE', 'NOTICE',
+    'CHANGELOG.md', 'CONTRIBUTING.md', 'SECURITY.md', 'RELEASE_NOTES.md',
+    'client/pyproject.toml', 'client/config.example.toml', 'client/README.md',
+    'client/LICENSE', 'client/NOTICE', 'client/SECURITY.md', 'client/CHANGELOG.md')
 $sourceDirs = @(
-    @{ Path = 'docs'; Extensions = @('.md') },
+    @{ Path = 'docs'; Extensions = @('.md'); Recursive = $true },
     @{ Path = 'examples'; Extensions = @('.psd1', '.http') },
     @{ Path = 'scripts'; Extensions = @('.ps1', '.py', '.sh'); Flat = $true },
     @{ Path = 'scripts/mock_ssh_launcher'; Extensions = @('.csproj', '.cs'); Flat = $true },
     @{ Path = 'tests'; Extensions = @('.ps1', '.py', '.sh'); Flat = $true },
-    @{ Path = 'tools'; Extensions = @('.ps1'); Flat = $true }
+    @{ Path = 'tools'; Extensions = @('.ps1', '.py'); Flat = $true },
+    @{ Path = '.github/workflows'; Extensions = @('.yml', '.yaml'); Flat = $true },
+    @{ Path = 'client/src'; Extensions = @('.py'); Recursive = $true },
+    @{ Path = 'client/tests'; Extensions = @('.py'); Recursive = $true },
+    @{ Path = 'client/station'; Extensions = @('.sh'); Recursive = $true },
+    @{ Path = 'client/contrib'; Extensions = @('.service'); Recursive = $true },
+    @{ Path = 'client/reports'; Extensions = @('.md'); Recursive = $true }
 )
 
 function Copy-ReleaseSource([string]$RelativePath) {
@@ -45,10 +53,15 @@ try {
     foreach ($spec in $sourceDirs) {
         $path = Join-Path $root $spec.Path
         if (-not (Test-Path -LiteralPath $path -PathType Container)) { throw "Missing source directory: $($spec.Path)" }
-        $files = Get-ChildItem -LiteralPath $path -File -Force
+        $files = if($spec.ContainsKey('Recursive') -and [bool]$spec.Recursive){
+            Get-ChildItem -LiteralPath $path -File -Force -Recurse
+        }else{
+            Get-ChildItem -LiteralPath $path -File -Force
+        }
         foreach ($file in $files) {
             if ($spec.Extensions -notcontains $file.Extension) { continue }
-            Copy-ReleaseSource (Join-Path $spec.Path $file.Name)
+            $relative = $file.FullName.Substring($root.Length + 1)
+            Copy-ReleaseSource $relative
         }
     }
     $manifestPath = Join-Path $stage 'MANIFEST.sha256'

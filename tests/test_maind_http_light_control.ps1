@@ -1,9 +1,9 @@
 [CmdletBinding()]param([string]$OutputDirectory)
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version Latest
-$root=Split-Path -Parent $PSScriptRoot
+$root=Split-Path -Parent (Split-Path -Parent $PSCommandPath)
 . (Join-Path $root 'scripts\maind_http_target_helpers.ps1')
-Set-MaindHttpTarget -NodeId 258 -EndpointId 1
+Set-MaindHttpTarget -NodeId 4660 -EndpointId 1
 . (Join-Path $root 'scripts\maind_http_response_helpers.ps1')
 . (Join-Path $root 'scripts\maind_http_onoff_control_helpers.ps1')
 . (Join-Path $root 'scripts\maind_http_capability_helpers.ps1')
@@ -19,7 +19,7 @@ function Assert-Rejected([scriptblock]$Action,[string]$Message){
 function Get-FreePort{$l=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,0);$l.Start();try{$l.LocalEndpoint.Port}finally{$l.Stop()}}
 $port=Get-FreePort;$python=(Get-Command python).Source
 $psi=[Diagnostics.ProcessStartInfo]::new();$psi.FileName=$python;$psi.UseShellExecute=$false;$psi.CreateNoWindow=$true;$psi.RedirectStandardOutput=$true;$psi.RedirectStandardError=$true
-foreach($a in @((Join-Path $root 'tests\maind_http_mock_server.py'),'--port',[string]$port)){[void]$psi.ArgumentList.Add($a)}
+foreach($a in @((Join-Path $root 'scripts\maind_http_mock_server.py'),'--port',[string]$port)){[void]$psi.ArgumentList.Add($a)}
 $server=[Diagnostics.Process]::new();$server.StartInfo=$psi;[void]$server.Start();$out=$server.StandardOutput.ReadToEndAsync();$err=$server.StandardError.ReadToEndAsync()
 $client=[Net.Http.HttpClient]::new();$client.Timeout=[TimeSpan]::FromSeconds(5);$calls=[Collections.Generic.List[string]]::new()
 function Invoke-Request([string]$Mode,[string]$Method,[string]$Path,[AllowNull()][string]$Body,[bool]$Temp,[string]$Name,[bool]$VisualColor=$false,[int]$RestoreLevel=-1){
@@ -249,10 +249,10 @@ try{
     Assert-True (-not(Read-OnOff color $true visual_color_final_onoff)) 'visual color OnOff restore mismatch'
 
     foreach($bad in @(
-      @{m='brightness';j='{"nodeId":258,"endpointId":1,"clusterId":8,"commandId":4,"fields":{"level":66,"transitionTime":5,"optionsMask":0,"optionsOverride":0}}'},
-      @{m='brightness';j='{"nodeId":258,"endpointId":1,"clusterId":8,"commandId":0,"fields":{"level":66,"transitionTime":5,"optionsMask":1,"optionsOverride":1}}'},
-      @{m='color';j='{"nodeId":258,"endpointId":1,"clusterId":768,"commandId":7,"fields":{}}'},
-      @{m='color';j='{"nodeId":258,"endpointId":2,"clusterId":768,"commandId":6,"fields":{"hue":1,"saturation":1,"transitionTime":5,"optionsMask":0,"optionsOverride":0}}'}
+      @{m='brightness';j='{"nodeId":4660,"endpointId":1,"clusterId":8,"commandId":4,"fields":{"level":66,"transitionTime":5,"optionsMask":0,"optionsOverride":0}}'},
+      @{m='brightness';j='{"nodeId":4660,"endpointId":1,"clusterId":8,"commandId":0,"fields":{"level":66,"transitionTime":5,"optionsMask":1,"optionsOverride":1}}'},
+      @{m='color';j='{"nodeId":4660,"endpointId":1,"clusterId":768,"commandId":7,"fields":{}}'},
+      @{m='color';j='{"nodeId":4660,"endpointId":2,"clusterId":768,"commandId":6,"fields":{"hue":1,"saturation":1,"transitionTime":5,"optionsMask":0,"optionsOverride":0}}'}
     )){Assert-True (-not(Test-MaindLightControlRequestAllowed -Mode $bad.m -Method POST -Path /interaction/invokeCommand -RequestBody $bad.j -TemporaryOnAllowed $true)) 'forbidden invoke allowed'}
     [ordered]@{all_pass=$true;real_api_used=$false;boolean_decoder=$true;unsigned_decoder=$true;nullable_unsigned_decoder=$true;invalid_tlv_rejected=$true;multiple_tlv_rejected=$true;matter_errors_rejected=$true;invoke_without_errors=$true;invoke_with_empty_errors=$true;unconfirmed_invoke_rejected=$true;unknown_invoke_shape_rejected=$true;invoke_identity_checked=$true;brightness_off_scenario_restored=$true;brightness_on_scenario_restored=$true;brightness_on_scenario_remained_on=$true;emergency_restore_shared_implementation=$true;emergency_restore_order=$true;restore_level_failure_rejected=$true;restore_onoff_failure_rejected=$true;restore_fault_after_each_operation=$true;ssh_loss_surfaced=$true;independent_watchdog_after_controller_termination=$true;failure_path_restoration_attempted=$true;restoration_failure_flagged=$true;color_restored=$true;color_mode_restored=$true;onoff_restored=$true;level_restored=$true;calls=@($calls)}|ConvertTo-Json -Depth 10|Set-Content -Encoding UTF8 (Join-Path $OutputDirectory results.json)
     'LIGHT_CONTROL_MOCK=PASS'

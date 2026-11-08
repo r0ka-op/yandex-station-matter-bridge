@@ -3,9 +3,9 @@ param([string]$OutputDirectory)
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
-$root = Split-Path -Parent $PSScriptRoot
+$root = Split-Path -Parent (Split-Path -Parent $PSCommandPath)
 . (Join-Path $root 'scripts\maind_http_target_helpers.ps1')
-Set-MaindHttpTarget -NodeId 258 -EndpointId 1
+Set-MaindHttpTarget -NodeId 4660 -EndpointId 1
 . (Join-Path $root 'scripts\maind_http_response_helpers.ps1')
 . (Join-Path $root 'scripts\maind_http_onoff_control_helpers.ps1')
 if (-not $OutputDirectory) {
@@ -30,7 +30,7 @@ $psi.UseShellExecute = $false
 $psi.CreateNoWindow = $true
 $psi.RedirectStandardOutput = $true
 $psi.RedirectStandardError = $true
-foreach ($arg in @((Join-Path $root 'tests\maind_http_mock_server.py'),'--port',[string]$port)) {
+foreach ($arg in @((Join-Path $root 'scripts\maind_http_mock_server.py'),'--port',[string]$port)) {
     [void]$psi.ArgumentList.Add($arg)
 }
 $server = [Diagnostics.Process]::new(); $server.StartInfo = $psi
@@ -67,8 +67,8 @@ try {
     Assert-True $ready 'Mock server not ready'
 
     $devicesRaw = Invoke-AllowlistedRequest GET /devices $null devices
-    $devices = Get-MaindDevicesJsonAnalysis $devicesRaw 258
-    Assert-True $devices.Analysis.target_found 'Node 258 missing before control sequence'
+    $devices = Get-MaindDevicesJsonAnalysis $devicesRaw 4660
+    Assert-True $devices.Analysis.target_found 'Node 4660 missing before control sequence'
     $readBody = Get-MaindOnOffReadRequestJson
     $initialRaw = Invoke-AllowlistedRequest POST /interaction/readAttribute $readBody initial_read
     Assert-True (Test-Path (Join-Path $OutputDirectory 'initial_read.raw')) 'Initial raw body not saved'
@@ -93,10 +93,10 @@ try {
         'POST /interaction/readAttribute')) 'Control sequence order mismatch'
 
     foreach ($bad in @(
-        @{m='POST';p='/interaction/invokeCommand';b='{"nodeId":258,"endpointId":2,"clusterId":6,"commandId":1,"fields":{}}'},
-        @{m='POST';p='/interaction/invokeCommand';b='{"nodeId":258,"endpointId":1,"clusterId":8,"commandId":1,"fields":{}}'},
-        @{m='POST';p='/interaction/invokeCommand';b='{"nodeId":258,"endpointId":1,"clusterId":6,"commandId":2,"fields":{}}'},
-        @{m='POST';p='/interaction/invokeCommand';b='{"nodeId":258,"endpointId":1,"clusterId":6,"commandId":1,"fields":{"x":1}}'},
+        @{m='POST';p='/interaction/invokeCommand';b='{"nodeId":4660,"endpointId":2,"clusterId":6,"commandId":1,"fields":{}}'},
+        @{m='POST';p='/interaction/invokeCommand';b='{"nodeId":4660,"endpointId":1,"clusterId":8,"commandId":1,"fields":{}}'},
+        @{m='POST';p='/interaction/invokeCommand';b='{"nodeId":4660,"endpointId":1,"clusterId":6,"commandId":2,"fields":{}}'},
+        @{m='POST';p='/interaction/invokeCommand';b='{"nodeId":4660,"endpointId":1,"clusterId":6,"commandId":1,"fields":{"x":1}}'},
         @{m='POST';p='/interaction/writeAttribute';b='{}'},
         @{m='POST';p='/interaction/invokeGroupCommand';b='{}'},
         @{m='DELETE';p='/devices';b=$null}

@@ -1,0 +1,37 @@
+# Скопируйте в config.toml и поправьте. Неизвестные ключи считаются ошибкой.
+
+[station]
+ssh_alias = "station-root"   # алиас из ~/.ssh/config (ключевая аутентификация, BatchMode)
+ip   = "192.168.1.50"        # IPv4 Станции: нужен для проверки, что порт 8765 не виден из LAN
+# ipv6 = "fe80::..."         # то же для IPv6 (по возможности)
+transport = "ssh-exec"       # для нашей Mini 2; tunnel только если sshd поддерживает forwarding
+api_port = 8765
+
+[lamp]
+# Если не заданы — берутся из GET /devices, когда лампа ровно одна.
+# node_id = "0x1234"
+# endpoint_id = 1
+name = "Эмби лампа"
+color_temp = false           # explicit opt-in: command 0x0A is declared but not hardware-tested by this client
+min_kelvin = 2703            # real inventory: 370 mired
+max_kelvin = 6493            # real inventory: 154 mired
+
+[safety]
+require_guard = true
+allow_unknown_firmware = false   # после OTA оставьте false, пока не сверите хеши
+# extra_maind_sha256 = ["..."]   # добавьте хеш, когда проверили свою сборку
+# extra_launcher_sha256 = ["..."]
+
+[mqtt]
+host = "localhost"
+port = 1883
+username = ""
+# пароль лучше через переменную окружения YMATTER_MQTT_PASSWORD
+tls = false
+base_topic = "ymatter"
+discovery_prefix = "homeassistant"
+
+[bridge]
+poll_interval = 10    # секунд; один опрос = 4–5 запросов к maind
+verify_timeout = 5    # сколько ждать подтверждения readback после команды
+safety_recheck_interval = 30  # каждые 30 с; перед ЛЮБОЙ командой — повторно
