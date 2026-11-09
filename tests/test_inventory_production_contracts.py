@@ -24,7 +24,8 @@ check("production-helper-set", set(helpers)=={
     "maind_http_target_helpers.ps1",
     "maind_http_response_helpers.ps1","maind_http_onoff_control_helpers.ps1",
     "maind_http_capability_helpers.ps1","maind_http_light_control_helpers.ps1",
-    "maind_http_light_state_verification_helpers.ps1","maind_http_inventory_helpers.ps1"}, str(helpers))
+    "maind_http_light_state_verification_helpers.ps1","maind_http_inventory_helpers.ps1",
+    "maind_http_multi_admin_readonly_helpers.ps1","maind_http_multi_admin_ecm_helpers.ps1"}, str(helpers))
 check("inventory-route-boundary", "'/devices'" in inventory and "'/interaction/readAttribute'" in inventory
       and "'/interaction/invokeCommand'" not in inventory and "'/interaction/writeAttribute'" not in inventory,
       "inventory helper admits only devices/readAttribute")
@@ -35,7 +36,7 @@ check("endpoint-recursion", "$queue.Enqueue" in inventory and "foreach($part in 
 check("runtime-helper-binding", "maind_http_runtime_test_remote.sh" in controller and "ConvertFrom-LifecycleRefusal" in controller,
       "controller stages production helper and parses structured refusal")
 check("no-ssh-forwarding", " -L " not in controller and "127.0.0.1:8765" in controller,
-      "HTTP is executed through station-loopback wget")
+      "HTTP is executed through station-loopback clients without SSH forwarding")
 codes=set(re.findall(r'PF_[A-Z0-9_]+',remote))
 required={"PF_LEGACY_HTTP_TEST","PF_LEGACY_READ_VERIFY","PF_EXPERIMENT_WORKER","PF_UNRESOLVED_RUN",
           "PF_RUN_BASE_EXISTS","PF_LOCK_ACTIVE","PF_LOCK_STALE_OR_AMBIGUOUS","PF_MISSING_UTILITY",
@@ -59,4 +60,5 @@ result={"generated_utc":time.strftime("%Y-%m-%dT%H:%M:%SZ",time.gmtime()),"case_
 out=ROOT/"results"/"tests"/"inventory_production_contracts.json";out.parent.mkdir(parents=True,exist_ok=True)
 out.write_text(json.dumps(result,indent=2),encoding="utf-8")
 print(json.dumps(result,indent=2))
-raise SystemExit(0 if result["all_pass"] else 1)
+if __name__ == "__main__":
+    raise SystemExit(0 if result["all_pass"] else 1)

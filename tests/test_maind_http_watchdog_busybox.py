@@ -37,8 +37,8 @@ def build_isolated(production: pathlib.Path) -> str:
     )
     text = replace_once(text, 'LOCK_DIR="/tmp/maind-http-runtime.lock"', 'LOCK_DIR="$RUN_ROOT/.lock"', "isolated lock")
     text = replace_once(text, 'PATCH_MOUNT="/data/quasar/quasar_patches"', 'PATCH_MOUNT="$BASE/mock-patch-mount"', "patch mount")
-    if text.count("/usr/bin/wget") != 3:
-        raise RuntimeError("expected exactly three production wget calls")
+    if text.count("/usr/bin/wget") != 4:
+        raise RuntimeError("expected one wget capability check and three production wget calls")
     text = text.replace("/usr/bin/wget", '"$BASE/mock-bin/wget"')
     if text.count('kill -TERM "$old"') != 2:
         raise RuntimeError("platformd signal: expected exactly two replacements")

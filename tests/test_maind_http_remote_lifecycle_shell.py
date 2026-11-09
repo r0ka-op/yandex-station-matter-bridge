@@ -225,6 +225,28 @@ def main():
                           "rollback_exit":None if rollback is None else rollback.returncode})
             time.sleep(2.2)
 
+    # Execute the production watchdog() body independently of the controller.
+    # arm() stages the normal 120-second value; shortening only the isolated
+    # fixture file makes the test finish promptly without changing production.
+    with fixture_directory("maind-shell-watchdog-") as root:
+        run_id="run-shell-watchdog-expiry"
+        (root/"platformd.pid").write_text("1000\n",encoding="ascii")
+        helper=build_helper(root,run_id)
+        pre=invoke(helper,root,run_id,f"preflight {TOKEN}")
+        arm=invoke(helper,root,run_id,f"arm {TOKEN} 120")
+        base=root/"maind-http-runs"/run_id
+        (base/"watchdog.seconds").write_text("1\n",encoding="ascii")
+        expired=invoke(helper,root,run_id,"watchdog")
+        verify=invoke(helper,root,run_id,"verify-clean")
+        completed=(base/"completed").read_text().strip() if (base/"completed").exists() else ""
+        passed=(pre.returncode==0 and arm.returncode==0 and expired.returncode==0 and
+                verify.returncode==0 and completed==run_id and
+                not (root/"maind-http-runtime.lock").exists())
+        cases.append({"name":"watchdog-independent-expiry","pass":passed,
+                      "preflight_exit":pre.returncode,"arm_exit":arm.returncode,
+                      "watchdog_exit":expired.returncode,"verify_exit":verify.returncode,
+                      "watchdog_stdout":expired.stdout,"watchdog_stderr":expired.stderr})
+
     result={
         "generated_utc":time.strftime("%Y-%m-%dT%H:%M:%SZ",time.gmtime()),
         "production_shell_sha256":hashlib.sha256(SOURCE.read_bytes()).hexdigest(),

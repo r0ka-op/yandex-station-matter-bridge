@@ -186,6 +186,105 @@ function Assert-MaindHttpResponse {
     }
 }
 
+function ConvertFrom-MaindRawHttpResponse {
+    param(
+        [Parameter(Mandatory = $true)][AllowEmptyString()][string]$RawResponse,
+        [Parameter(Mandatory = $true)][AllowEmptyString()][string]$RawStderr,
+        [Parameter(Mandatory = $true)][int]$SshExitCode,
+        [ValidateSet('telnet','native')][string]$TransportKind = 'telnet'
+    )
+
+    $markerName = if($TransportKind-ceq'native'){'__MAIND_NATIVE_EXIT__'}else{'__MAIND_TELNET_EXIT__'}
+    $markerPattern = '(?m)^'+[regex]::Escape($markerName)+'=([0-9]+)\s*$'
+    $markerMatches = [regex]::Matches($RawStderr, $markerPattern)
+    $transportExitCode = if ($markerMatches.Count) {
+        [int]$markerMatches[$markerMatches.Count - 1].Groups[1].Value
+    } else { $null }
+    $diagnosticStderr = [regex]::Replace(
+        $RawStderr,
+        '(?m)^'+[regex]::Escape($markerName)+'=[0-9]+\s*\r?\n?',
+        ''
+    )
+
+    $separator = "`r`n`r`n"
+    $separatorIndex = $RawResponse.IndexOf($separator, [StringComparison]::Ordinal)
+    $headerText = if ($separatorIndex -ge 0) { $RawResponse.Substring(0, $separatorIndex) } else { '' }
+    $body = if ($separatorIndex -ge 0) { $RawResponse.Substring($separatorIndex + $separator.Length) } else { '' }
+    $lines = @()
+    if ($headerText) { $lines = @($headerText -split "`r`n") }
+    $statusMatch = if ($lines.Count) {
+        [regex]::Match($lines[0], '^HTTP/1\.[01]\s+([1-5][0-9]{2})(?:\s+(.*))?$')
+    } else { $null }
+    $statusCode = if ($null -ne $statusMatch -and $statusMatch.Success) {
+        [int]$statusMatch.Groups[1].Value
+    } else { $null }
+    $reason = if ($null -ne $statusMatch -and $statusMatch.Success) {
+        $statusMatch.Groups[2].Value.Trim()
+    } else { $null }
+    $headers = @($lines | Select-Object -Skip 1)
+    $contentLengthLines = @($headers | Where-Object { $_ -match '(?i)^Content-Length\s*:' })
+    $contentLength = $null
+    if ($contentLengthLines.Count -eq 1 -and $contentLengthLines[0] -match '(?i)^Content-Length\s*:\s*([0-9]+)\s*$') {
+        $contentLength = [long]$matches[1]
+    }
+    $actualBodyLength = [Text.Encoding]::UTF8.GetByteCount($body)
+
+    $transportError = $null
+    $protocolError = $null
+    $httpError = $null
+    $transferError = $null
+    $bodyError = $null
+    if ($SshExitCode -ne 0) {
+        $transportError = "SSH transport exited with code $SshExitCode"
+    } elseif ($null -eq $transportExitCode) {
+        $transportError = 'Remote raw-HTTP completion marker is missing'
+    } elseif ($transportExitCode -ne 0) {
+        $transferError = if($TransportKind-ceq'native'){
+            "maind-http-local exited with code $transportExitCode"
+        }else{
+            "BusyBox telnet exited with code $transportExitCode"
+        }
+    } elseif ($separatorIndex -lt 0 -or $null -eq $statusCode) {
+        $protocolError = 'A complete HTTP/1.x status and CRLF header block was not received'
+    } elseif (@($headers | Where-Object { $_ -match '(?i)^Transfer-Encoding\s*:' }).Count) {
+        $protocolError = 'Transfer-Encoding responses are not accepted by the bounded raw HTTP transport'
+    } elseif ($contentLengthLines.Count -ne 1 -or $null -eq $contentLength) {
+        $protocolError = 'Exactly one valid Content-Length response header is required'
+    } elseif ($actualBodyLength -ne $contentLength) {
+        $protocolError = "HTTP body length mismatch: header=$contentLength actual=$actualBodyLength"
+    } elseif ($statusCode -lt 200 -or $statusCode -ge 300) {
+        $httpError = "HTTP route or handler returned $statusCode $reason".Trim()
+    }
+    if ($actualBodyLength -eq 0) { $bodyError = 'HTTP response body is empty' }
+
+    [pscustomobject][ordered]@{
+        transport = if($TransportKind-ceq'native'){'maind_http_local_native_http_1_1'}else{'busybox_telnet_raw_http_1_1'}
+        transport_exit_code = $transportExitCode
+        http_status = $statusCode
+        reason = $reason
+        headers = $headers
+        diagnostic_stderr = $diagnosticStderr
+        content_length = $contentLength
+        body_length = $actualBodyLength
+        body = $body
+        transport_error = $transportError
+        protocol_error = $protocolError
+        http_error = $httpError
+        transfer_error = $transferError
+        body_error = $bodyError
+    }
+}
+
+function New-MaindRawHttpPostRequest {
+    param(
+        [Parameter(Mandatory=$true)][string]$Path,
+        [Parameter(Mandatory=$true)][AllowEmptyString()][string]$Body
+    )
+    if($Path-notmatch'^/[A-Za-z0-9/_-]+$'){throw 'Raw HTTP path contains forbidden characters.'}
+    $length=[Text.UTF8Encoding]::new($false).GetByteCount($Body)
+    return "POST $Path HTTP/1.1`r`nHost: 127.0.0.1:8765`r`nContent-Type: application/json`r`nContent-Length: $length`r`nConnection: close`r`n`r`n$Body"
+}
+
 function ConvertTo-MatterNodeIdValue {
     param([AllowNull()]$Value)
 

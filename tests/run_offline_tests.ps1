@@ -38,7 +38,7 @@ Invoke-Case 'remote_shell_syntax' {
 $python=(Get-Command python -ErrorAction Stop).Source
 Invoke-Case 'matter_tlv_decoder' {& $python (Join-Path $PSScriptRoot 'test_matter_tlv_decoder.py');if($LASTEXITCODE){throw 'TLV tests failed'}}
 Invoke-Case 'rollback_model' {& $python (Join-Path $PSScriptRoot 'test_maind_http_rollback.py');if($LASTEXITCODE){throw 'Rollback tests failed'}}
-foreach($name in @('test_maind_http_controller.ps1','test_maind_http_onoff_control.ps1','test_maind_http_capability_discovery.ps1','test_maind_http_light_control.ps1','test_maind_http_light_state_verification.ps1','test_maind_http_strictmode.ps1','test_maind_http_visual_brightness_timing.ps1')){Invoke-Case $name {& (Join-Path $PSScriptRoot $name)}}
+foreach($name in @('test_maind_http_controller.ps1','test_maind_http_raw_post_transport.ps1','test_matter_ws_message_filter.ps1','test_maind_http_onoff_control.ps1','test_maind_http_capability_discovery.ps1','test_maind_http_light_control.ps1','test_maind_http_light_state_verification.ps1','test_maind_http_strictmode.ps1','test_maind_http_visual_brightness_timing.ps1')){Invoke-Case $name {& (Join-Path $PSScriptRoot $name)}}
 Invoke-Case 'production_end_to_end_and_fault_injection' {& (Join-Path $PSScriptRoot 'run_full_matter_controller_audit.ps1') -OutputDirectory (Join-Path $OutputDirectory 'full-audit')}
 $summary=[pscustomobject][ordered]@{generated_utc=[DateTime]::UtcNow.ToString('o');runtime=$PSVersionTable.PSVersion.ToString();station_contacted=$false;cases=@($cases);passed=@($cases|Where-Object status -eq 'PASS').Count;failed=@($cases|Where-Object status -eq 'FAIL').Count}
 $summary|ConvertTo-Json -Depth 10|Set-Content -LiteralPath (Join-Path $OutputDirectory 'offline-tests.json') -Encoding utf8
