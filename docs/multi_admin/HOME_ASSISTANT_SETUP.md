@@ -1,0 +1,123 @@
+# Home Assistant Matter setup
+
+## Выбранный вариант
+
+Для ближайшего лабораторного теста используется официальный image Matter.js Server на
+Ubuntu с host networking. Он уже запущен на `test-stend-server` и доступен по
+`ws://<MATTER_SERVER_LAN_IP>:5580/ws`.
+
+SOURCE — официальный проект предоставляет Docker image для test/evaluation, но прямо
+предупреждает, что custom container не является поддерживаемой конфигурацией Home
+Assistant. Для постоянной эксплуатации предпочтителен Home Assistant OS с official
+Matter Server app. Windows Docker Desktop не выбран из-за VM/NAT и менее предсказуемых
+IPv6 link-local/mDNS semantics.
+
+## Фактическая конфигурация
+
+Файл: `deploy/matter-server/docker-compose.ubuntu.yml`.
+
+```yaml
+services:
+  matter-server:
+    image: ghcr.io/matter-js/matterjs-server:stable
+    container_name: matterjs-server
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      STORAGE_PATH: /data
+      PRIMARY_INTERFACE: enp5s0
+      LISTEN_ADDRESS: 127.0.0.1,enp5s0
+      LOG_LEVEL: info
+      MATTER_LOG_FORMAT: plain
+      TZ: Europe/Moscow
+    volumes:
+      - ./matter-data:/data
+```
+
+`127.0.0.1` стоит первым в `LISTEN_ADDRESS`, потому что встроенный health check не умеет
+разрешать имя interface. `enp5s0` добавляет адреса лабораторной LAN и IPv6 link-local.
+
+Развёрнутая копия находится в `<LAB_USER_HOME>/matter-lab`. Управление:
+
+```bash
+cd <LAB_USER_HOME>/matter-lab
+docker compose ps
+docker compose logs --no-color --tail=200
+docker compose pull
+docker compose up -d
+docker compose stop
+```
+
+Не выполнять `down -v` и не удалять `matter-data`: там хранится fabric независимого
+контроллера.
+
+## Проверенный результат
+
+- CONFIRMED — `matter-server/1.5.5`, `matter.js/0.18.0`, container healthy.
+- CONFIRMED — HTTP dashboard дал `200`.
+- CONFIRMED — `ws://127.0.0.1:5580/ws` дал `101 Switching Protocols` и `server_info`.
+- CONFIRMED — read-only WebSocket `get_nodes` вернул 0 узлов.
+- CONFIRMED — после restart загружены прежний server identity и controller credentials.
+- CONFIRMED — Wi-Fi/Thread credentials не заданы; BLE отключён.
+- NOT TESTED — доступ TCP/5580 с фактического Home Assistant host и Companion App.
+
+## Подключение Home Assistant
+
+Подключение server не является commissioning и может быть выполнено заранее:
+
+1. Обновить Home Assistant и Companion App до актуальных версий.
+2. В Home Assistant открыть **Settings → Devices & services → Add integration → Matter**.
+3. На экране **Select the connection method** снять флажок автоматической установки
+   official Matter Server app.
+4. Нажать Submit и ввести `ws://<MATTER_SERVER_LAN_IP>:5580/ws`.
+5. Убедиться, что integration загружена, сервер доступен, devices=0.
+6. Не нажимать Add device до отдельного разрешения на commissioning.
+
+Если HA работает на том же Ubuntu host с host networking, допустим
+`ws://127.0.0.1:5580/ws`. С другого хоста нужен LAN URL выше.
+
+## Companion App для будущего Multi-Admin
+
+Подготовка без запуска commissioning:
+
+1. Android: полная версия Companion из Play Store, Android 8.1+ (рекомендуется 12+),
+   актуальные Google Play Services, Bluetooth включён, Location = Allow all the time.
+   Проверить **Android Settings → Google → Devices & sharing → Matter devices**.
+2. iOS: iOS 16+ и актуальная Companion App; Bluetooth включён.
+3. Телефон подключить к основной 2.4 GHz LAN TP-Link, без guest/client isolation.
+4. После отдельного разрешения и фактического открытия window:
+   **HA Companion → Settings → Connectivity → Matter → Add device → Yes, it’s already
+   in use**.
+5. SOURCE — официальный UI предлагает выбрать текущую ecosystem для известных platforms.
+   UNKNOWN — Яндекс может отсутствовать в этом списке. В таком случае использовать
+   ручной ввод временного commission code/QR, полученного при Enhanced window, если UI
+   его предлагает. Не использовать заводской код как замену временному ECM code.
+6. Для уже работающей по Wi-Fi лампы Matter.js поддерживает network-only commissioning.
+   Ubuntu BLE не требуется; телефонный platform flow всё равно может требовать Bluetooth.
+
+Home Assistant сам не может открыть окно на лампе, которая ещё принадлежит только fabric
+Яндекса. Текущий Yandex controller сначала должен безопасно открыть окно и выдать
+временный code.
+
+## Сетевые требования
+
+- Ubuntu `enp5s0`, лампа, Станция, HA и телефон — одна L2 LAN/VLAN.
+- IPv6 link-local и multicast должны проходить; Internet IPv6 и DHCPv6 не обязательны.
+- mDNS/DNS-SD multicast не должен фильтроваться или ломаться reflector'ом.
+- TCP/5580 нужен от HA до Matter Server; не публиковать его в Internet.
+- Matter operational port рекламируется устройством и не обязан заранее быть UDP/5540.
+- Не менять firewall/маршруты до диагностики конкретного отказа.
+
+## HA OS как альтернатива
+
+Для постоянного стенда использовать HA OS 10+ на отдельном устройстве либо VM с bridged
+Ethernet NIC в ту же LAN. Не использовать NAT-only virtual network. Bridging физического
+Ethernet предсказуемее Wi-Fi client bridge. В HA OS Matter integration автоматически
+устанавливает и сопровождает official Matter Server app.
+
+## Источники
+
+- [Home Assistant Matter integration and Companion flows](https://www.home-assistant.io/integrations/matter/)
+- [Official Matter.js Docker guidance](https://github.com/matter-js/matterjs-server/blob/main/docs/docker.md)
+- [Matter.js OS/network requirements](https://github.com/matter-js/matterjs-server/blob/main/docs/os_requirements.md)
+- [Matter.js WebSocket API](https://github.com/matter-js/matterjs-server/blob/main/docs/websockets_api.md)

@@ -1,5 +1,36 @@
 # Yandex Station Matter HTTP API and `ymatter`
 
+## Независимое Matter-управление YNDX-00560
+
+Эмби Лампа YNDX-00560 успешно добавлена во вторую Matter Fabric с сохранением
+исходной Яндекс Fabric. Независимый Matter.js Server восстановил узел из
+persistence после перезапуска и напрямую выполнил:
+
+- чтение фактического состояния;
+- включение и выключение;
+- изменение яркости;
+- изменение Hue/Saturation;
+- изменение цветовой температуры;
+- последующий readback и восстановление исходного состояния.
+
+Повторный commissioning для обычной работы не требуется. Production-путь
+использует один Matter.js Server и сохранённый `/data`; запуск второго
+контроллера с той же Fabric identity не допускается.
+
+Автоматический bootstrap Read/subscription Matter.js 0.18.0 несовместим с этой
+версией прошивки лампы и завершается `peer-ack-missing` до SubscribeRequest.
+Поэтому auto-subscription отключена штатным параметром сервера, а состояние
+получается ограниченными по времени одиночными Read/polling-запросами. Команды
+отправляются без автоматических повторов и подтверждаются отдельным readback.
+
+Управление по прямому пути Ubuntu → Matter.js → лампа подтверждено. Тест при
+физически или сетево недоступной Яндекс Станции пока **не выполнялся**.
+
+Подробности, ограничения, команды и результаты аппаратных тестов:
+[docs/multi_admin/DIRECT_CONTROL.md](docs/multi_admin/DIRECT_CONTROL.md).
+Публичный redacted inventory:
+[docs/multi_admin/YNDX00560_INVENTORY.json](docs/multi_admin/YNDX00560_INVENTORY.json).
+
 Исследование встроенного Matter HTTP API Яндекс Станции и Python-клиент для работы с уже сопряжёнными Matter-устройствами.
 
 Created and maintained by [r0ka-op](https://github.com/r0ka-op).
