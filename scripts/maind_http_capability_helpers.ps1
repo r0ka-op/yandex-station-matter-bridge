@@ -67,7 +67,8 @@ function Get-MaindAttributeResult {
     param(
         [Parameter(Mandatory = $true)][string]$JsonText,
         [Parameter(Mandatory = $true)][UInt64]$ClusterId,
-        [Parameter(Mandatory = $true)][UInt64]$AttributeId
+        [Parameter(Mandatory = $true)][UInt64]$AttributeId,
+        [UInt64]$EndpointId = 1
     )
     if ([string]::IsNullOrWhiteSpace($JsonText)) { throw 'Matter read response body is empty' }
     $parsed = ConvertFrom-Json -InputObject $JsonText -Depth 30 -NoEnumerate -ErrorAction Stop
@@ -102,11 +103,11 @@ function Get-MaindAttributeResult {
         foreach ($required in @('endpointId','clusterId','attributeId')) {
             if ($null -eq $_.PSObject.Properties[$required]) { return $false }
         }
-        [UInt64]$_.endpointId -eq 1 -and [UInt64]$_.clusterId -eq $ClusterId -and
+        [UInt64]$_.endpointId -eq $EndpointId -and [UInt64]$_.clusterId -eq $ClusterId -and
         [UInt64]$_.attributeId -eq $AttributeId
     })
     if ($valueMatches.Count -ne 1) {
-        throw "Expected exactly one endpoint 1 / cluster $ClusterId / attribute $AttributeId value"
+        throw "Expected exactly one endpoint $EndpointId / cluster $ClusterId / attribute $AttributeId value"
     }
     $rawProperty = $valueMatches[0].PSObject.Properties['rawValue']
     if ($null -eq $rawProperty -or $null -eq $rawProperty.Value) {

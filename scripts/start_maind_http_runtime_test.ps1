@@ -13,6 +13,15 @@ param(
     [string]$LightStateVerificationToken,
     [switch]$CapabilityDiscovery,
     [switch]$VendorColorMusicDiscovery,
+    [switch]$MultiAdminReadOnly,
+    [switch]$MultiAdminECM,
+    [switch]$MultiAdminECMTransportProbeOnly,
+    [string]$MultiAdminECMConfirmToken,
+    [ValidateRange(180,900)][int]$EcmCommissioningTimeoutSeconds=600,
+    [ValidateRange(0,4095)][int]$EcmDiscriminator=0,
+    [ValidateRange(60,600)][int]$MatterJsDiscoveryTimeoutSeconds=300,
+    [ValidateRange(1500,1800)][int]$EcmWatchdogSeconds=1500,
+    [Uri]$MatterServerWebSocketUri,
     [switch]$InternalOnOffControl,
     [string]$ControlConfirmToken,
     [switch]$InternalBrightnessControl,
@@ -47,6 +56,8 @@ Set-MaindHttpTarget -NodeId $MatterNodeId -EndpointId $MatterEndpointId
 . (Join-Path $root "scripts\maind_http_light_control_helpers.ps1")
 . (Join-Path $root "scripts\maind_http_light_state_verification_helpers.ps1")
 . (Join-Path $root "scripts\maind_http_inventory_helpers.ps1")
+. (Join-Path $root "scripts\maind_http_multi_admin_readonly_helpers.ps1")
+. (Join-Path $root "scripts\maind_http_multi_admin_ecm_helpers.ps1")
 $controlEnabled = [bool]$InternalOnOffControl.IsPresent
 $capabilityEnabled = [bool]$CapabilityDiscovery.IsPresent
 $vendorDiscoveryEnabled = [bool]$VendorColorMusicDiscovery.IsPresent
@@ -55,7 +66,44 @@ $visualBrightnessEnabled = [bool]$InternalVisualBrightnessControl.IsPresent
 $colorEnabled = [bool]$InternalColorControl.IsPresent
 $visualColorEnabled = [bool]$InternalVisualColorControl.IsPresent
 $inventoryEnabled = [bool]$InternalFullInventory.IsPresent
-if($InventoryTargetNodeId -eq 0){$InventoryTargetNodeId=$MatterNodeId}
+$InventoryTargetNodeId=if($InventoryTargetNodeId-eq0){$MatterNodeId}else{$InventoryTargetNodeId}
+$multiAdminEnabled = [bool]$MultiAdminReadOnly.IsPresent
+$multiAdminEcmEnabled = [bool]$MultiAdminECM.IsPresent
+$ecmTransportProbeOnly = [bool]$MultiAdminECMTransportProbeOnly.IsPresent
+$ecmContext=$null
+$ecmTiming=$null
+$script:EcmCurrentPhase='Preparation'
+if($multiAdminEcmEnabled){
+    $expectedEcmToken=if($ecmTransportProbeOnly){
+        'I_APPROVE_ONE_MULTI_ADMIN_ECM_READ_ONLY_TRANSPORT_PROBE'
+    }else{
+        'I_APPROVE_ONE_MULTI_ADMIN_ECM_SESSION'
+    }
+    if($MultiAdminECMConfirmToken-cne$expectedEcmToken){
+        throw 'Refusing MultiAdminECM: exact one-session token required.'
+    }
+    if($InventoryTargetNodeId-eq0 -or $InventoryTargetNodeId-eq4660){
+        throw 'MultiAdminECM requires the expected real Node ID; 0 and demonstration ID 4660 are forbidden.'
+    }
+    if($null-eq$MatterServerWebSocketUri -or $MatterServerWebSocketUri.Scheme-notin@('ws','wss')){
+        throw 'MultiAdminECM requires an explicit ws:// or wss:// Matter Server URI.'
+    }
+    if($EcmCommissioningTimeoutSeconds-lt($MatterJsDiscoveryTimeoutSeconds+120)){
+        throw 'Commissioning window must exceed Matter.js discovery timeout by at least 120 seconds.'
+    }
+    if($EcmWatchdogSeconds-lt1500){
+        throw 'ECM watchdog must be at least 1500 seconds to preserve main, rollback, and independent safety budgets.'
+    }
+    if($EcmDiscriminator-eq0){
+        $random=[byte[]]::new(2);[Security.Cryptography.RandomNumberGenerator]::Fill($random)
+        $EcmDiscriminator=[BitConverter]::ToUInt16($random,0)-band0x0FFF
+    }
+    $ecmContext=New-MaindEcmContext -ExpectedNodeId $InventoryTargetNodeId `
+        -CommissioningTimeoutSeconds $EcmCommissioningTimeoutSeconds -Discriminator $EcmDiscriminator
+    $ecmTiming=New-MaindEcmTimingContext -WatchdogSeconds $EcmWatchdogSeconds
+}elseif($ecmTransportProbeOnly){
+    throw 'MultiAdminECMTransportProbeOnly requires MultiAdminECM.'
+}
 $inventoryContext = if($inventoryEnabled){New-MaindInventoryContext -NodeId $InventoryTargetNodeId}else{$null}
 $lightMode = if ($brightnessEnabled) {'brightness'} elseif ($colorEnabled) {'color'} else {$null}
 $lightControlEnabled = [bool]($brightnessEnabled -or $colorEnabled)
@@ -95,7 +143,7 @@ if ($AllowTemporaryOn -and (-not $lightControlEnabled -or
 }
 $selectedModeCount = [int]$controlEnabled + [int]$ReadOnOffAttribute.IsPresent +
     [int]$lightStateVerificationEnabled + [int]$capabilityEnabled + [int]$vendorDiscoveryEnabled +
-    [int]$brightnessEnabled + [int]$colorEnabled + [int]$inventoryEnabled
+    [int]$brightnessEnabled + [int]$colorEnabled + [int]$inventoryEnabled + [int]$multiAdminEnabled + [int]$multiAdminEcmEnabled
 if ($selectedModeCount -gt 1) {
     throw 'Runtime experiment modes are mutually exclusive.'
 }
@@ -103,7 +151,14 @@ $readOnOffEnabled = [bool]($ReadOnOffAttribute.IsPresent -or $controlEnabled)
 $httpRequestPlan = @(Get-MaindHttpReadOnlyRequestPlan `
     -ReadOnOffAttributeEnabled $readOnOffEnabled)
 foreach ($plannedRequest in $httpRequestPlan) {
-    if ($inventoryEnabled) {
+    if ($multiAdminEcmEnabled) {
+        Assert-MaindEcmRequestAllowed -Context $ecmContext -Method $plannedRequest.method `
+            -Path $plannedRequest.path -RequestBody $plannedRequest.body
+    } elseif ($multiAdminEnabled) {
+        Assert-MaindMultiAdminRequestAllowed -Method $plannedRequest.method `
+            -Path $plannedRequest.path -RequestBody $plannedRequest.body `
+            -ExpectedNodeId $InventoryTargetNodeId
+    } elseif ($inventoryEnabled) {
         Assert-MaindInventoryRequestAllowed -Context $inventoryContext -Method $plannedRequest.method `
             -Path $plannedRequest.path -RequestBody $plannedRequest.body
     } elseif ($lightStateVerificationEnabled) {
@@ -138,10 +193,15 @@ $remotePath = if ($StagingOnly) {
 }
 $remoteBase = "/tmp/maind-http-runs/$runId"
 $remoteHelperCommand = "MAIND_HTTP_RUN_ID=$runId MAIND_HTTP_BASE=$remoteBase MAIND_HTTP_NODE_ID=$MatterNodeId MAIND_HTTP_ENDPOINT_ID=$MatterEndpointId '$remotePath'"
+$localNativeHttpClient = Join-Path $root 'deploy\maind-http-local\maind-http-local.aarch64'
+$remoteNativeHttpClient = "/tmp/maind-http-local.$runId"
 $stagingAttempted = $false
 $helperUploaded = $false
 $helperValidated = $false
+$nativeHttpClientUploaded = $false
+$nativeHttpClientValidated = $false
 $activationCommandIssued = $false
+$rollbackRequestClaimed = $false
 $originalOnOffState = $null
 $changeCommandAttempted = $false
 $restorationVerified = $false
@@ -152,19 +212,37 @@ $lightMutationMayHaveOccurred = $false
 $visualColorRestoreLevel = -1
 $resultDir = if($inventoryEnabled){
     Join-Path $root "results\private\inventory-$runStamp"
+}elseif($multiAdminEnabled){
+    Join-Path $root "results\private\multi-admin-readonly-$runStamp"
+}elseif($multiAdminEcmEnabled){
+    Join-Path $root "results\private\multi-admin-ecm-$runStamp"
 }else{
     Join-Path $root "results\runtime\maind-http-$runStamp"
 }
 New-Item -ItemType Directory -Path $resultDir -Force | Out-Null
 [ordered]@{run_id=$runId;remote_base=$remoteBase;remote_helper=$remotePath;created_utc=[DateTime]::UtcNow.ToString('o')} |
     ConvertTo-Json | Set-Content -Encoding UTF8 (Join-Path $resultDir 'run_identity.json')
-
-function Invoke-Ssh([string]$Command) {
-    & $ssh -o BatchMode=yes -o ConnectTimeout=10 $SshAlias $Command
-    if ($LASTEXITCODE -ne 0) { throw "SSH command failed: $Command" }
+if($multiAdminEcmEnabled){
+    Get-MaindEcmTimingSummary $ecmTiming|ConvertTo-Json|Set-Content -Encoding utf8NoBOM `
+        (Join-Path $resultDir 'ecm_timing_budget.json')
 }
 
-function Invoke-SshCaptured([string]$Command) {
+function Get-ControllerTimeoutMilliseconds([int]$LocalTimeoutSeconds,[string]$Phase=$script:EcmCurrentPhase,[int]$MinimumRemainingSeconds=1){
+    if($multiAdminEcmEnabled){
+        return Get-MaindEcmBoundedTimeoutMilliseconds -Timing $ecmTiming `
+            -LocalTimeoutSeconds $LocalTimeoutSeconds -Phase $Phase `
+            -MinimumRemainingSeconds $MinimumRemainingSeconds
+    }
+    return $LocalTimeoutSeconds*1000
+}
+
+function Stop-ProcessTreeBounded([Diagnostics.Process]$Process){
+    if($Process.HasExited){return}
+    try{$Process.Kill($true)}catch{}
+    [void]$Process.WaitForExit(5000)
+}
+
+function Invoke-SshCaptured([string]$Command,[int]$TimeoutSeconds=45,[string]$Phase=$script:EcmCurrentPhase) {
     $psi=[Diagnostics.ProcessStartInfo]::new()
     $psi.FileName=$ssh
     $psi.UseShellExecute=$false
@@ -179,16 +257,25 @@ function Invoke-SshCaptured([string]$Command) {
     try{
         $stdoutTask=$process.StandardOutput.ReadToEndAsync()
         $stderrTask=$process.StandardError.ReadToEndAsync()
-        if(-not$process.WaitForExit(30000)){
-            $process.Kill($true);$process.WaitForExit()
-            throw 'Captured SSH command timed out after 30 seconds'
+        $timeoutMs=Get-ControllerTimeoutMilliseconds $TimeoutSeconds $Phase
+        if(-not$process.WaitForExit($timeoutMs)){
+            Stop-ProcessTreeBounded $process
+            throw "SSH wall-clock deadline exceeded in $Phase; remote outcome is ambiguous."
         }
+        [void][Threading.Tasks.Task]::WaitAll([Threading.Tasks.Task[]]@($stdoutTask,$stderrTask),5000)
         [pscustomobject]@{
             exit_code=$process.ExitCode
-            stdout=$stdoutTask.GetAwaiter().GetResult()
-            stderr=$stderrTask.GetAwaiter().GetResult()
+            stdout=if($stdoutTask.IsCompletedSuccessfully){$stdoutTask.Result}else{''}
+            stderr=if($stderrTask.IsCompletedSuccessfully){$stderrTask.Result}else{''}
         }
     }finally{$process.Dispose()}
+}
+
+function Invoke-Ssh([string]$Command,[int]$TimeoutSeconds=45,[string]$Phase=$script:EcmCurrentPhase) {
+    $result=Invoke-SshCaptured -Command $Command -TimeoutSeconds $TimeoutSeconds -Phase $Phase
+    if($result.stderr){Write-Verbose $result.stderr}
+    if($result.exit_code-ne0){throw "SSH command failed with exit code $($result.exit_code); remote outcome may be ambiguous."}
+    if($result.stdout){Write-Output -NoEnumerate $result.stdout}
 }
 
 function ConvertFrom-LifecycleRefusal([string]$Stdout,[string]$Stderr,[int]$ExitCode){
@@ -241,12 +328,24 @@ function Send-FileOverSshStdin([string]$LocalPath, [string]$RemoteTarget) {
     $process.StartInfo = $psi
     if (-not $process.Start()) { throw "Could not start ssh byte transport" }
     try {
-        $process.StandardInput.BaseStream.Write($bytes, 0, $bytes.Length)
+        $timeoutMs=Get-ControllerTimeoutMilliseconds 60 'Preparation'
+        $writeTask=$process.StandardInput.BaseStream.WriteAsync($bytes,0,$bytes.Length)
+        if(-not$writeTask.Wait($timeoutMs)){
+            Stop-ProcessTreeBounded $process
+            throw 'SSH staging stdin deadline exceeded; remote staging state is ambiguous.'
+        }
         $process.StandardInput.BaseStream.Flush()
         $process.StandardInput.Close()
-        $stdout = $process.StandardOutput.ReadToEnd()
-        $stderr = $process.StandardError.ReadToEnd()
-        $process.WaitForExit()
+        $stdoutTask=$process.StandardOutput.ReadToEndAsync()
+        $stderrTask=$process.StandardError.ReadToEndAsync()
+        $timeoutMs=Get-ControllerTimeoutMilliseconds 60 'Preparation'
+        if(-not$process.WaitForExit($timeoutMs)){
+            Stop-ProcessTreeBounded $process
+            throw 'SSH staging wall-clock deadline exceeded; remote staging state is ambiguous.'
+        }
+        [void][Threading.Tasks.Task]::WaitAll([Threading.Tasks.Task[]]@($stdoutTask,$stderrTask),5000)
+        $stdout=if($stdoutTask.IsCompletedSuccessfully){$stdoutTask.Result}else{''}
+        $stderr=if($stderrTask.IsCompletedSuccessfully){$stderrTask.Result}else{''}
         if ($process.ExitCode -ne 0) {
             throw "SSH stdin staging failed (exit $($process.ExitCode)): $stderr"
         }
@@ -291,11 +390,12 @@ function Receive-DirectoryOverSshTar([string]$RemoteDirectory, [string]$LocalDir
         $stream = [System.IO.File]::Open($archive, [System.IO.FileMode]::Create)
         try {
             $copyTask=$process.StandardOutput.BaseStream.CopyToAsync($stream)
-            if(-not $process.WaitForExit(90000)){
-                $process.Kill($true);$process.WaitForExit()
+            $timeoutMs=Get-ControllerTimeoutMilliseconds 90 'Rollback'
+            if(-not $process.WaitForExit($timeoutMs)){
+                Stop-ProcessTreeBounded $process
                 throw 'SSH tar retrieval timed out after 90 seconds'
             }
-            [void]$copyTask.GetAwaiter().GetResult()
+            if(-not$copyTask.Wait(5000)){throw 'SSH tar stream did not close after process exit'}
         } finally { $stream.Dispose() }
         $stderr = $stderrTask.GetAwaiter().GetResult()
         if ($process.ExitCode -ne 0) {
@@ -325,13 +425,18 @@ function Receive-DirectoryOverSshTar([string]$RemoteDirectory, [string]$LocalDir
 
 function Remove-PartialStaging() {
     try {
-        & $ssh -o BatchMode=yes -o ConnectTimeout=10 $SshAlias "rm -f '$remotePath'"
-        if ($LASTEXITCODE -ne 0) {
-            Write-Warning "Remote cleanup returned exit code $LASTEXITCODE"
-        }
+        Invoke-Ssh -Command "rm -f '$remotePath' '$remoteNativeHttpClient'" -TimeoutSeconds 30 -Phase 'Preparation'
+        $script:nativeHttpClientUploaded=$false
     } catch {
         Write-Warning "Could not remove partial staging file: $_"
     }
+}
+
+function Remove-NativeHttpClient() {
+    if(-not$nativeHttpClientUploaded){return}
+    Invoke-Ssh -Command "rm -f '$remoteNativeHttpClient'; test ! -e '$remoteNativeHttpClient'" `
+        -TimeoutSeconds 30 -Phase 'Rollback'
+    $script:nativeHttpClientUploaded=$false
 }
 
 function Test-TcpBlocked([System.Net.IPAddress]$Address, [int]$Port) {
@@ -391,6 +496,121 @@ function Format-ExceptionChain([System.Exception]$Exception) {
     return ($lines -join [Environment]::NewLine)
 }
 
+function Invoke-MaindTelnetHttpPostTransport {
+    param(
+        [Parameter(Mandatory=$true)][string]$Path,
+        [Parameter(Mandatory=$true)][string]$RequestBody,
+        [ValidateRange(1,300)][int]$TimeoutSec=30,
+        [ValidateRange(1024,2097152)][int]$MaxResponseBytes=1048576,
+        [string]$DeadlinePhase=$script:EcmCurrentPhase
+    )
+    $requestText=New-MaindRawHttpPostRequest -Path $Path -Body $RequestBody
+    $requestBase64=[Convert]::ToBase64String([Text.UTF8Encoding]::new($false).GetBytes($requestText))
+    # BusyBox wget on the target firmware has no --post-data.  The installed
+    # telnet applet is used strictly as a loopback raw-TCP carrier.  A remote
+    # timer kills the isolated process group, while the controller retains an
+    # independent wall-clock timeout and kills the local ssh.exe process tree.
+    $remoteCommand=@"
+/bin/busybox setsid /bin/sh -c "printf '%s' '$requestBase64' | /bin/busybox base64 -d | /bin/busybox telnet 127.0.0.1 8765" &
+transport_pid=`$!
+(
+  /bin/busybox sleep $TimeoutSec
+  /bin/busybox kill -TERM -"`$transport_pid" 2>/dev/null || /bin/busybox kill -TERM "`$transport_pid" 2>/dev/null || true
+) &
+timer_pid=`$!
+wait "`$transport_pid"
+transport_rc=`$?
+/bin/busybox kill "`$timer_pid" 2>/dev/null || true
+wait "`$timer_pid" 2>/dev/null || true
+printf '\n__MAIND_TELNET_EXIT__=%s\n' "`$transport_rc" >&2
+exit 0
+"@
+    $psi=[Diagnostics.ProcessStartInfo]::new();$psi.FileName=$ssh;$psi.UseShellExecute=$false;$psi.CreateNoWindow=$true
+    $psi.RedirectStandardOutput=$true;$psi.RedirectStandardError=$true
+    foreach($argument in @('-T','-o','BatchMode=yes','-o','ConnectTimeout=10',$SshAlias,$remoteCommand)){[void]$psi.ArgumentList.Add($argument)}
+    $process=[Diagnostics.Process]::new();$process.StartInfo=$psi
+    if(-not$process.Start()){throw 'Could not start bounded raw HTTP transport'}
+    $stdout=[IO.MemoryStream]::new()
+    try{
+        $stdoutTask=$process.StandardOutput.BaseStream.CopyToAsync($stdout)
+        $stderrTask=$process.StandardError.ReadToEndAsync()
+        $timeoutMs=Get-ControllerTimeoutMilliseconds ($TimeoutSec+15) $DeadlinePhase
+        $deadline=[DateTime]::UtcNow.AddMilliseconds($timeoutMs)
+        while(-not$stdoutTask.IsCompleted){
+            if($stdout.Length-gt$MaxResponseBytes){Stop-ProcessTreeBounded $process;throw "Raw HTTP response exceeded $MaxResponseBytes bytes."}
+            if([DateTime]::UtcNow-ge$deadline){Stop-ProcessTreeBounded $process;throw 'Raw HTTP transport deadline exceeded; remote outcome may be ambiguous.'}
+            Start-Sleep -Milliseconds 50
+        }
+        [void]$stdoutTask.GetAwaiter().GetResult()
+        if(-not$process.WaitForExit(5000)){Stop-ProcessTreeBounded $process;throw 'Raw HTTP SSH process did not terminate after response stream closed.'}
+        if($stdout.Length-gt$MaxResponseBytes){throw "Raw HTTP response exceeded $MaxResponseBytes bytes."}
+        $raw=[Text.UTF8Encoding]::new($false,$true).GetString($stdout.ToArray())
+        $stderr=$stderrTask.GetAwaiter().GetResult()
+        return ConvertFrom-MaindRawHttpResponse -RawResponse $raw -RawStderr $stderr -SshExitCode $process.ExitCode
+    }finally{
+        $requestText=$null;$requestBase64=$null
+        $stdout.Dispose();$process.Dispose()
+    }
+}
+
+function Invoke-MaindNativeHttpPostTransport {
+    param(
+        [Parameter(Mandatory=$true)][string]$Path,
+        [Parameter(Mandatory=$true)][string]$RequestBody,
+        [ValidateRange(1,300)][int]$TimeoutSec=30,
+        [ValidateRange(1024,2097152)][int]$MaxResponseBytes=1048576,
+        [string]$DeadlinePhase=$script:EcmCurrentPhase
+    )
+    if(-not$multiAdminEcmEnabled-or-not$nativeHttpClientValidated){
+        throw 'Native HTTP transport is available only after validated MultiAdminECM staging.'
+    }
+    if($Path-notin@('/interaction/readAttribute','/commissioning/window')){
+        throw "Native HTTP POST path is not allowlisted: $Path"
+    }
+    $requestBytes=[Text.UTF8Encoding]::new($false).GetBytes($RequestBody)
+    if($requestBytes.Length-eq0-or$requestBytes.Length-gt1048576){
+        throw 'Native HTTP request body length is outside the allowed range.'
+    }
+    $nativeTimeoutMs=$TimeoutSec*1000
+    $remoteCommand="'$remoteNativeHttpClient' --method POST --path '$Path' --timeout-ms $nativeTimeoutMs --max-response $MaxResponseBytes; native_rc=`$?; printf '\n__MAIND_NATIVE_EXIT__=%s\n' `$native_rc >&2; exit 0"
+    $psi=[Diagnostics.ProcessStartInfo]::new();$psi.FileName=$ssh;$psi.UseShellExecute=$false;$psi.CreateNoWindow=$true
+    $psi.RedirectStandardInput=$true;$psi.RedirectStandardOutput=$true;$psi.RedirectStandardError=$true
+    foreach($argument in @('-T','-o','BatchMode=yes','-o','ConnectTimeout=10',$SshAlias,$remoteCommand)){[void]$psi.ArgumentList.Add($argument)}
+    $process=[Diagnostics.Process]::new();$process.StartInfo=$psi
+    if(-not$process.Start()){throw 'Could not start bounded native HTTP transport'}
+    $stdout=[IO.MemoryStream]::new()
+    try{
+        $stdoutTask=$process.StandardOutput.BaseStream.CopyToAsync($stdout)
+        $stderrTask=$process.StandardError.ReadToEndAsync()
+        $writeTask=$process.StandardInput.BaseStream.WriteAsync($requestBytes,0,$requestBytes.Length)
+        $timeoutMs=Get-ControllerTimeoutMilliseconds ($TimeoutSec+15) $DeadlinePhase
+        $deadline=[DateTime]::UtcNow.AddMilliseconds($timeoutMs)
+        while(-not$writeTask.IsCompleted){
+            if([DateTime]::UtcNow-ge$deadline){Stop-ProcessTreeBounded $process;throw 'Native HTTP request stdin deadline exceeded; remote outcome may be ambiguous.'}
+            if($process.HasExited){break}
+            Start-Sleep -Milliseconds 25
+        }
+        [void]$writeTask.GetAwaiter().GetResult()
+        $process.StandardInput.Close()
+        while(-not$stdoutTask.IsCompleted){
+            if($stdout.Length-gt$MaxResponseBytes){Stop-ProcessTreeBounded $process;throw "Native HTTP response exceeded $MaxResponseBytes bytes."}
+            if([DateTime]::UtcNow-ge$deadline){Stop-ProcessTreeBounded $process;throw 'Native HTTP transport deadline exceeded; remote outcome may be ambiguous.'}
+            Start-Sleep -Milliseconds 25
+        }
+        [void]$stdoutTask.GetAwaiter().GetResult()
+        if(-not$process.WaitForExit(5000)){Stop-ProcessTreeBounded $process;throw 'Native HTTP SSH process did not terminate after response stream closed.'}
+        if($stdout.Length-gt$MaxResponseBytes){throw "Native HTTP response exceeded $MaxResponseBytes bytes."}
+        $raw=[Text.UTF8Encoding]::new($false,$true).GetString($stdout.ToArray())
+        $stderr=$stderrTask.GetAwaiter().GetResult()
+        return ConvertFrom-MaindRawHttpResponse -RawResponse $raw -RawStderr $stderr `
+            -SshExitCode $process.ExitCode -TransportKind native
+    }finally{
+        $requestBytes=$null
+        try{$process.StandardInput.Close()}catch{}
+        $stdout.Dispose();$process.Dispose()
+    }
+}
+
 function Invoke-RemoteLoopbackHttpRequest(
     [ValidateSet("GET", "POST")][string]$Method,
     [string]$Path,
@@ -401,6 +621,8 @@ function Invoke-RemoteLoopbackHttpRequest(
     [bool]$ReadOnOffAttributeEnabled = $false,
     [bool]$OnOffControlEnabled = $false,
     [bool]$CapabilityDiscoveryEnabled = $false,
+    [bool]$MultiAdminReadOnlyEnabled = $false,
+    [bool]$MultiAdminECMEnabled = $false,
     [bool]$LightStateVerificationEnabled = $false,
     [AllowNull()][string]$LightControlMode = $null,
     [bool]$TemporaryOnAllowed = $false,
@@ -409,7 +631,12 @@ function Invoke-RemoteLoopbackHttpRequest(
     [AllowNull()]$InventoryContext=$null,
     [int]$MaxBodyBytes=1048576
 ) {
-    if($null-ne$InventoryContext){
+    if($MultiAdminECMEnabled){
+        Assert-MaindEcmRequestAllowed -Context $ecmContext -Method $Method -Path $Path -RequestBody $RequestBody
+    } elseif($MultiAdminReadOnlyEnabled){
+        Assert-MaindMultiAdminRequestAllowed -Method $Method -Path $Path `
+            -RequestBody $RequestBody -ExpectedNodeId $InventoryTargetNodeId
+    } elseif($null-ne$InventoryContext){
         Assert-MaindInventoryRequestAllowed -Context $InventoryContext -Method $Method -Path $Path -RequestBody $RequestBody
     } elseif ($LightStateVerificationEnabled) {
         Assert-MaindLightStateVerificationRequestAllowed -Method $Method -Path $Path `
@@ -448,13 +675,45 @@ function Invoke-RemoteLoopbackHttpRequest(
         [System.IO.File]::WriteAllText($requestBodyPath, $RequestBody, [Text.UTF8Encoding]::new($false))
         $requestBodyHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $requestBodyPath).Hash.ToLowerInvariant()
     }
+    if($Method-eq'POST'){
+        $started=[DateTime]::UtcNow
+        try{
+            $raw=if($multiAdminEcmEnabled){
+                Invoke-MaindNativeHttpPostTransport -Path $Path -RequestBody $RequestBody `
+                    -TimeoutSec $TimeoutSec -MaxResponseBytes ($MaxBodyBytes+16384)
+            }else{
+                Invoke-MaindTelnetHttpPostTransport -Path $Path -RequestBody $RequestBody `
+                    -TimeoutSec $TimeoutSec -MaxResponseBytes ($MaxBodyBytes+16384)
+            }
+            $completed=[DateTime]::UtcNow
+            [IO.File]::WriteAllText($bodyPath,$raw.body,[Text.UTF8Encoding]::new($false))
+            $raw.diagnostic_stderr|Set-Content -Encoding utf8NoBOM $stderrPath
+            $raw.headers|Set-Content -Encoding utf8NoBOM $headersPath
+            $bodyLength=(Get-Item -LiteralPath $bodyPath).Length
+            $bodyHash=(Get-FileHash -Algorithm SHA256 -LiteralPath $bodyPath).Hash.ToLowerInvariant()
+            $state=[ordered]@{
+                started_utc=$started.ToString('o');completed_utc=$completed.ToString('o');method=$Method
+                transport=$raw.transport;proxy='not_applicable_loopback_raw_tcp';url=$url;ssh_exit_code=0
+                transport_exit_code=$raw.transport_exit_code;http_status=$raw.http_status;reason=$raw.reason
+                headers=@($raw.headers);headers_file=[IO.Path]::GetFileName($headersPath)
+                body_file=[IO.Path]::GetFileName($bodyPath);body_length=$bodyLength;body_sha256=$bodyHash
+                request_body_file=if($requestBodyPath){[IO.Path]::GetFileName($requestBodyPath)}else{$null}
+                request_body_length=[Text.Encoding]::UTF8.GetByteCount($RequestBody);request_body_sha256=$requestBodyHash
+                transport_error=$raw.transport_error;protocol_error=$raw.protocol_error;http_error=$raw.http_error
+                transfer_error=$raw.transfer_error;body_error=$raw.body_error
+            }
+            $state|ConvertTo-Json -Depth 5|Set-Content -Encoding utf8NoBOM $statePath
+            if($RequireSuccess){Assert-MaindHttpResponse -Evidence $raw -RequireNonEmptyBody $true}
+            return [pscustomobject]@{Body=$raw.body;State=[pscustomobject]$state}
+        }catch{
+            Format-ExceptionChain $_.Exception|Set-Content -Encoding utf8NoBOM (Join-Path $resultDir "$EvidenceName.error.txt")
+            throw
+        }
+    }
     # The marker separates the remote wget exit code from ssh.exe's transport
     # exit code. A valid HTTP 404 may have wget_exit_code=1 and ssh_exit_code=0.
-    $wgetRequest = if ($Method -eq "POST") {
-        "/usr/bin/wget -Y off -S -T $TimeoutSec -O - --header='Content-Type: application/json' --post-data='$RequestBody' '$url'"
-    } else {
-        "/usr/bin/wget -Y off -S -T $TimeoutSec -O - '$url'"
-    }
+    if($Method-cne'GET'){throw 'Internal transport routing error: wget is GET-only on this firmware.'}
+    $wgetRequest = "/usr/bin/wget -Y off -S -T $TimeoutSec -O - '$url'"
     $remoteCommand = "$wgetRequest; wget_rc=`$?; printf '\n__MAIND_WGET_EXIT__=%s\n' `$wget_rc >&2; exit 0"
 
     $psi = [System.Diagnostics.ProcessStartInfo]::new()
@@ -476,21 +735,21 @@ function Invoke-RemoteLoopbackHttpRequest(
         $bodyStream = [System.IO.File]::Open($bodyPath, [System.IO.FileMode]::Create)
         try {
             $bodyCopyTask=$process.StandardOutput.BaseStream.CopyToAsync($bodyStream)
-            $processTimeoutMs=($TimeoutSec+15)*1000
+            $processTimeoutMs=Get-ControllerTimeoutMilliseconds ($TimeoutSec+15) $script:EcmCurrentPhase
             $deadline=[DateTime]::UtcNow.AddMilliseconds($processTimeoutMs)
             while(-not$bodyCopyTask.IsCompleted){
                 if($bodyStream.Length-gt$MaxBodyBytes){
-                    $process.Kill($true);$process.WaitForExit()
+                    Stop-ProcessTreeBounded $process
                     throw "HTTP response exceeded per-response limit of $MaxBodyBytes bytes"
                 }
                 if([DateTime]::UtcNow-ge$deadline){
-                    $process.Kill($true);$process.WaitForExit()
+                    Stop-ProcessTreeBounded $process
                     throw "SSH/wget request exceeded controller deadline of $processTimeoutMs ms"
                 }
                 Start-Sleep -Milliseconds 50
             }
             [void]$bodyCopyTask.GetAwaiter().GetResult()
-            $process.WaitForExit()
+            if(-not$process.WaitForExit(5000)){Stop-ProcessTreeBounded $process;throw 'SSH/wget process did not terminate after response stream closed'}
             if($bodyStream.Length-gt$MaxBodyBytes){throw "HTTP response exceeded per-response limit of $MaxBodyBytes bytes"}
         } finally { $bodyStream.Dispose() }
         $completed = [DateTime]::UtcNow
@@ -542,6 +801,142 @@ function Invoke-RemoteLoopbackHttpRequest(
             Set-Content -Encoding UTF8 (Join-Path $resultDir "$EvidenceName.error.txt")
         throw
     } finally { $process.Dispose() }
+}
+
+function Invoke-MaindEcmWindowPostSecure([string]$RequestBody,[string]$ClaimPath){
+    Assert-MaindEcmRequestAllowed -Context $ecmContext -Method POST -Path '/commissioning/window' -RequestBody $RequestBody
+    # Persist the one-shot claim before transport. Any timeout or SSH loss is
+    # therefore terminal for this run and cannot cause an automatic repeat.
+    Claim-MaindEcmWindowPost -Context $ecmContext -ClaimPath $ClaimPath
+    $raw=$null
+    try{
+        $raw=Invoke-MaindNativeHttpPostTransport -Path '/commissioning/window' -RequestBody $RequestBody `
+            -TimeoutSec 60 -MaxResponseBytes 65536 -DeadlinePhase 'Post'
+        Assert-MaindHttpResponse -Evidence $raw -RequireNonEmptyBody $true
+        $window=ConvertFrom-MaindEcmWindowResponse $raw.body
+        # Persist only non-secret facts; the response itself remains in memory.
+        Get-MaindEcmRedactedSummary $window|ConvertTo-Json|Set-Content -Encoding utf8NoBOM `
+            (Join-Path $resultDir 'commissioning_window_response.redacted.json')
+        return $window
+    }catch{
+        (Protect-MaindEcmDiagnosticText (Format-ExceptionChain $_.Exception))|Set-Content -Encoding utf8NoBOM `
+            (Join-Path $resultDir 'commissioning_window.error.redacted.txt')
+        throw 'One-shot commissioning-window request failed or is ambiguous; retry is forbidden for this run.'
+    }finally{$raw=$null}
+}
+
+function Close-MatterWebSocketBounded([Net.WebSockets.ClientWebSocket]$Socket,[string]$DeadlinePhase){
+    try{
+        if($Socket.State-in@([Net.WebSockets.WebSocketState]::Open,[Net.WebSockets.WebSocketState]::CloseReceived)){
+            $timeoutMs=Get-ControllerTimeoutMilliseconds 5 $DeadlinePhase
+            $cts=[Threading.CancellationTokenSource]::new($timeoutMs)
+            try{
+                [void]($Socket.CloseAsync([Net.WebSockets.WebSocketCloseStatus]::NormalClosure,'done',$cts.Token).GetAwaiter().GetResult())
+            }catch{
+                $Socket.Abort()
+            }finally{$cts.Dispose()}
+        }
+    }catch{$Socket.Abort()}finally{$Socket.Dispose()}
+}
+
+function Invoke-MatterServerCommissionWithCodeSecure([string]$ManualCode,[string]$ClaimPath){
+    $socket=[Net.WebSockets.ClientWebSocket]::new();$payload=$null;$bytes=$null
+    $commissionStartSeconds=$ecmTiming.Stopwatch.Elapsed.TotalSeconds
+    $structuredDiagnosticWritten=$false
+    try{
+        $connectCts=[Threading.CancellationTokenSource]::new((Get-ControllerTimeoutMilliseconds 10 'Commissioning'))
+        try{[void]($socket.ConnectAsync($MatterServerWebSocketUri,$connectCts.Token).GetAwaiter().GetResult())}finally{$connectCts.Dispose()}
+        $messageId='ecm-'+[Guid]::NewGuid().ToString('N')
+        $payload=ConvertTo-Json -Compress -Depth 6 ([ordered]@{
+            message_id=$messageId;command='commission_with_code';args=[ordered]@{
+                code=$ManualCode;network_only=$true;discovery_timeout_s=$MatterJsDiscoveryTimeoutSeconds
+            }
+        })
+        $bytes=[Text.Encoding]::UTF8.GetBytes($payload)
+        # Claim before the first byte can be sent. Cancellation or connection
+        # loss after this boundary is ambiguous and must never be retried.
+        Claim-MaindEcmMatterCommission -Context $ecmContext -ClaimPath $ClaimPath
+        $sendCts=[Threading.CancellationTokenSource]::new((Get-ControllerTimeoutMilliseconds 10 'Commissioning'))
+        try{[void]($socket.SendAsync([ArraySegment[byte]]::new($bytes),[Net.WebSockets.WebSocketMessageType]::Text,$true,$sendCts.Token).GetAwaiter().GetResult())}finally{$sendCts.Dispose()}
+        $transactionDeadline=$ecmTiming.Stopwatch.Elapsed.TotalSeconds+$MatterJsDiscoveryTimeoutSeconds+60
+        $buffer=[byte[]]::new(65536);$text=[Text.StringBuilder]::new()
+        while($ecmTiming.Stopwatch.Elapsed.TotalSeconds-lt$transactionDeadline){
+            $localRemaining=[int][Math]::Max(1,[Math]::Ceiling($transactionDeadline-$ecmTiming.Stopwatch.Elapsed.TotalSeconds))
+            $receiveCts=[Threading.CancellationTokenSource]::new((Get-ControllerTimeoutMilliseconds $localRemaining 'Commissioning'))
+            try{$part=$socket.ReceiveAsync([ArraySegment[byte]]::new($buffer),$receiveCts.Token).GetAwaiter().GetResult()}finally{$receiveCts.Dispose()}
+            if($part.MessageType-eq[Net.WebSockets.WebSocketMessageType]::Close){throw 'Matter.js closed WebSocket before a commissioning result; outcome is ambiguous.'}
+            [void]$text.Append([Text.Encoding]::UTF8.GetString($buffer,0,$part.Count))
+            if(-not$part.EndOfMessage){continue}
+            $reply=$text.ToString();$text.Clear()|Out-Null
+            try{$obj=ConvertFrom-Json $reply -NoEnumerate -ErrorAction Stop}catch{continue}
+            if((Get-MatterWsEnvelopeKind -Message $obj -ExpectedMessageId $messageId)-cne'matched_response'){continue}
+            $errorCode=Get-MatterWsProperty -Message $obj -Name 'error_code'
+            $error=Get-MatterWsProperty -Message $obj -Name 'error'
+            if(($null-ne$errorCode-and$null-ne$errorCode.Value)-or($null-ne$error-and$null-ne$error.Value)){
+                New-MatterJsCommissionErrorDiagnostic -Message $obj `
+                    -ElapsedSeconds ($ecmTiming.Stopwatch.Elapsed.TotalSeconds-$commissionStartSeconds)|
+                    ConvertTo-Json|Set-Content -Encoding utf8NoBOM `
+                    (Join-Path $resultDir 'matterjs_commission_error.redacted.json')
+                $structuredDiagnosticWritten=$true
+                throw 'Matter.js returned a commissioning error; retry is forbidden.'
+            }
+            if($null-eq(Get-MatterWsProperty -Message $obj -Name 'result')){throw 'Matter.js response matched message_id but omitted result; outcome is ambiguous.'}
+            [ordered]@{message_id_matched=$true;commissioning_result_received=$true;secret_echo_persisted=$false;attempts=1}|
+                ConvertTo-Json|Set-Content -Encoding utf8NoBOM (Join-Path $resultDir 'matterjs_commission_result.redacted.json')
+            return $obj
+        }
+        throw 'Matter.js commissioning transaction deadline expired; outcome is ambiguous and retry is forbidden.'
+    }catch{
+        if(-not$structuredDiagnosticWritten){
+            New-MatterJsCommissionErrorDiagnostic -Message $null `
+                -ElapsedSeconds ($ecmTiming.Stopwatch.Elapsed.TotalSeconds-$commissionStartSeconds)|
+                ConvertTo-Json|Set-Content -Encoding utf8NoBOM `
+                (Join-Path $resultDir 'matterjs_commission_error.redacted.json')
+        }
+        (Protect-MaindEcmDiagnosticText (Format-ExceptionChain $_.Exception))|Set-Content -Encoding utf8NoBOM `
+            (Join-Path $resultDir 'matterjs_commission.error.redacted.txt')
+        throw
+    }finally{
+        $payload=$null;$bytes=$null
+        Close-MatterWebSocketBounded $socket 'Commissioning'
+    }
+}
+
+function Get-MatterServerNodeCountSecure([string]$Phase,[string]$DeadlinePhase=$script:EcmCurrentPhase){
+    $socket=[Net.WebSockets.ClientWebSocket]::new()
+    try{
+        $connectCts=[Threading.CancellationTokenSource]::new((Get-ControllerTimeoutMilliseconds 10 $DeadlinePhase))
+        try{[void]($socket.ConnectAsync($MatterServerWebSocketUri,$connectCts.Token).GetAwaiter().GetResult())}finally{$connectCts.Dispose()}
+        $messageId='nodes-'+[Guid]::NewGuid().ToString('N')
+        $payload=ConvertTo-Json -Compress ([ordered]@{message_id=$messageId;command='get_nodes';args=[ordered]@{}})
+        $bytes=[Text.Encoding]::UTF8.GetBytes($payload)
+        $sendCts=[Threading.CancellationTokenSource]::new((Get-ControllerTimeoutMilliseconds 10 $DeadlinePhase))
+        try{[void]($socket.SendAsync([ArraySegment[byte]]::new($bytes),[Net.WebSockets.WebSocketMessageType]::Text,$true,$sendCts.Token).GetAwaiter().GetResult())}finally{$sendCts.Dispose()}
+        $transactionDeadline=$ecmTiming.Stopwatch.Elapsed.TotalSeconds+30
+        $buffer=[byte[]]::new(65536);$text=[Text.StringBuilder]::new()
+        while($ecmTiming.Stopwatch.Elapsed.TotalSeconds-lt$transactionDeadline){
+            $localRemaining=[int][Math]::Max(1,[Math]::Ceiling($transactionDeadline-$ecmTiming.Stopwatch.Elapsed.TotalSeconds))
+            $receiveCts=[Threading.CancellationTokenSource]::new((Get-ControllerTimeoutMilliseconds $localRemaining $DeadlinePhase))
+            try{$part=$socket.ReceiveAsync([ArraySegment[byte]]::new($buffer),$receiveCts.Token).GetAwaiter().GetResult()}finally{$receiveCts.Dispose()}
+            if($part.MessageType-eq[Net.WebSockets.WebSocketMessageType]::Close){throw 'Matter.js closed WebSocket before get_nodes result.'}
+            [void]$text.Append([Text.Encoding]::UTF8.GetString($buffer,0,$part.Count));if(-not$part.EndOfMessage){continue}
+            $reply=$text.ToString();$text.Clear()|Out-Null
+            try{$obj=ConvertFrom-Json $reply -NoEnumerate -ErrorAction Stop}catch{continue}
+            if((Get-MatterWsEnvelopeKind -Message $obj -ExpectedMessageId $messageId)-cne'matched_response'){continue}
+            $errorCode=Get-MatterWsProperty -Message $obj -Name 'error_code'
+            $error=Get-MatterWsProperty -Message $obj -Name 'error'
+            if(($null-ne$errorCode-and$null-ne$errorCode.Value)-or($null-ne$error-and$null-ne$error.Value)){
+                throw 'Matter.js get_nodes returned an error.'
+            }
+            $result=Get-MatterWsProperty -Message $obj -Name 'result'
+            if($null-eq$result){throw 'Matter.js get_nodes response omitted result.'}
+            $nodes=@($result.Value)
+            [ordered]@{phase=$Phase;node_count=$nodes.Count;payload_persisted=$false}|ConvertTo-Json|Set-Content -Encoding utf8NoBOM `
+                (Join-Path $resultDir "matterjs_nodes_$Phase.redacted.json")
+            return $nodes.Count
+        }
+        throw 'Matter.js get_nodes transaction deadline expired.'
+    }finally{Close-MatterWebSocketBounded $socket $DeadlinePhase}
 }
 
 function Invoke-CapabilityAttributeRead(
@@ -640,12 +1035,13 @@ function Invoke-LightOnOffRead([string]$EvidenceName) {
 }
 
 function Request-Rollback([string]$Reason) {
-    try { Invoke-Ssh "$remoteHelperCommand rollback $Reason" } catch { Write-Warning $_ }
+    if($rollbackRequestClaimed){return}
+    $script:rollbackRequestClaimed=$true
+    try { Invoke-Ssh -Command "$remoteHelperCommand rollback $Reason" -TimeoutSeconds 120 -Phase 'Rollback' } catch { Write-Warning $_ }
 }
 
 try {
-    & $ssh -o BatchMode=yes -o ConnectTimeout=10 $SshAlias "true"
-    if ($LASTEXITCODE -ne 0) { throw "SSH preflight failed" }
+    Invoke-Ssh -Command 'true' -TimeoutSeconds 20 -Phase 'Preparation'
 
     $stagingAttempted = $true
     $localSize = Send-FileOverSshStdin $remoteScript $remotePath
@@ -675,17 +1071,72 @@ printf 'size=%s\nsha256=%s\nshell_check=pass\n' "`$size" "`$hash"
         return
     }
 
-    # Dropbear on this station rejects direct-tcpip forwarding. Use an SSH remote
-    # command to run BusyBox wget against station loopback instead. Verify the
-    # required client and proxy-disable option before crossing activation.
-    Invoke-Ssh "test -x /usr/bin/wget; help=`$(/usr/bin/wget --help 2>&1); printf '%s' \"`$help\" | grep -q -- '-Y'; printf '%s' \"`$help\" | grep -q -- '--header'; printf '%s' \"`$help\" | grep -q -- '--post-data'"
-    [ordered]@{
-        verified_utc = [DateTime]::UtcNow.ToString("o")
-        transport = "ssh_remote_command_to_station_loopback"
-        remote_client = "/usr/bin/wget"
-        proxy = "forced_off"
-        ssh_local_forwarding = "unsupported_by_dropbear_policy"
-    } | ConvertTo-Json | Set-Content -Encoding UTF8 (Join-Path $resultDir "http_transport_preflight.json")
+    # Dropbear rejects direct-tcpip forwarding. GET keeps the firmware wget.
+    # MultiAdminECM POST uses the run-scoped native loopback-only client;
+    # legacy research modes retain their already tested telnet carrier.
+    if($multiAdminEcmEnabled){
+        if(-not(Test-Path -LiteralPath $localNativeHttpClient -PathType Leaf)){
+            throw "Native HTTP client is missing: $localNativeHttpClient"
+        }
+        $elf=[IO.File]::ReadAllBytes($localNativeHttpClient)
+        if($elf.Length-lt64-or$elf[0]-ne0x7f-or$elf[1]-ne0x45-or$elf[2]-ne0x4c-or$elf[3]-ne0x46-or
+            $elf[4]-ne2-or$elf[5]-ne1-or$elf[18]-ne0xb7-or$elf[19]-ne0){
+            throw 'Native HTTP client is not a little-endian ELF64 AArch64 executable.'
+        }
+        $nativeSize=$elf.Length
+        $nativeHash=(Get-FileHash -Algorithm SHA256 -LiteralPath $localNativeHttpClient).Hash.ToLowerInvariant()
+        $elf=$null
+        [void](Send-FileOverSshStdin $localNativeHttpClient $remoteNativeHttpClient)
+        $nativeHttpClientUploaded=$true
+        $nativeVerifyCommand=@"
+set -eu
+chmod 700 '$remoteNativeHttpClient'
+size=`$(wc -c < '$remoteNativeHttpClient')
+hash=`$(sha256sum '$remoteNativeHttpClient' | awk '{print `$1}')
+[ "`$size" = '$nativeSize' ]
+[ "`$hash" = '$nativeHash' ]
+[ "`$('$remoteNativeHttpClient' --version)" = 'maind-http-local 1' ]
+printf 'native_client=verified size=%s sha256=%s architecture=aarch64-static\n' "`$size" "`$hash"
+"@
+        $nativeEvidence=(Invoke-Ssh -Command $nativeVerifyCommand -TimeoutSeconds 30 -Phase 'Preparation'|Out-String).Trim()
+        if($nativeEvidence-notmatch'^native_client=verified size=[0-9]+ sha256=[0-9a-f]{64} architecture=aarch64-static$'){
+            throw 'Native HTTP client verification evidence is incomplete.'
+        }
+        $nativeHttpClientValidated=$true
+        $httpTransportPreflightCommand=@'
+set -eu
+test -x /usr/bin/wget
+help=$(/usr/bin/wget --help 2>&1)
+printf '%s' "$help" | grep -q -- '-Y'
+'@
+        Invoke-Ssh -Command $httpTransportPreflightCommand -TimeoutSeconds 30 -Phase 'Preparation'
+        [ordered]@{
+            verified_utc=[DateTime]::UtcNow.ToString('o');transport='ssh_stdin_to_native_loopback_http_client'
+            get_client='/usr/bin/wget';post_client=$remoteNativeHttpClient;post_client_sha256=$nativeHash
+            post_client_size=$nativeSize;post_client_elf='ELF64 little-endian AArch64 static'
+            request_encoding='exact_utf8_json_over_ssh_stdin';response_encoding='exact_http_1_1_bytes_over_ssh_stdout'
+            post_timeout='native_monotonic_deadline_plus_controller_wall_clock';fixed_destination='127.0.0.1:8765'
+            proxy='forced_off_for_get_not_applicable_for_native_post';ssh_local_forwarding='unsupported_by_dropbear_policy'
+        }|ConvertTo-Json|Set-Content -Encoding UTF8 (Join-Path $resultDir 'http_transport_preflight.json')
+    }else{
+        $httpTransportPreflightCommand=@'
+set -eu
+test -x /usr/bin/wget
+help=$(/usr/bin/wget --help 2>&1)
+printf '%s' "$help" | grep -q -- '-Y'
+applets=$(/bin/busybox --list)
+for applet in base64 kill setsid sleep telnet; do
+    printf '%s\n' "$applets" | grep -qx "$applet"
+done
+'@
+        Invoke-Ssh -Command $httpTransportPreflightCommand -TimeoutSeconds 30 -Phase 'Preparation'
+        [ordered]@{
+            verified_utc=[DateTime]::UtcNow.ToString('o');transport='ssh_remote_command_to_station_loopback'
+            get_client='/usr/bin/wget';post_client='/bin/busybox telnet';request_encoding='base64_to_exact_http_1_1_bytes'
+            post_timeout='remote_process_group_timer_plus_controller_wall_clock'
+            proxy='forced_off_for_get_not_applicable_for_raw_post';ssh_local_forwarding='unsupported_by_dropbear_policy'
+        }|ConvertTo-Json|Set-Content -Encoding UTF8 (Join-Path $resultDir 'http_transport_preflight.json')
+    }
 
     $lifecycleResult=Invoke-SshCaptured "$remoteHelperCommand preflight $requiredToken"
     $lifecyclePreflight=$lifecycleResult.stdout.Trim()
@@ -725,7 +1176,11 @@ done
         $oldMarkerEvidence|Set-Content -Encoding UTF8 `
             (Join-Path $resultDir 'old_light_markers.local_verified.txt')
     }
-    $watchdogSeconds=if($inventoryEnabled){[Math]::Min(3600,$InventoryMaxSessionSeconds+180)}else{360}
+    if($multiAdminEcmEnabled){
+        $nodesBefore=Get-MatterServerNodeCountSecure -Phase 'before'
+        if($nodesBefore-ne0){throw "Matter.js baseline must contain zero nodes; found $nodesBefore."}
+    }
+    $watchdogSeconds=if($multiAdminEcmEnabled){$EcmWatchdogSeconds}elseif($inventoryEnabled){[Math]::Min(3600,$InventoryMaxSessionSeconds+180)}else{360}
     $activationCommandIssued = $true
     Invoke-Ssh "$remoteHelperCommand arm $requiredToken $watchdogSeconds"
 
@@ -755,6 +1210,8 @@ done
         -ReadOnOffAttributeEnabled $readOnOffEnabled `
         -OnOffControlEnabled $controlEnabled `
         -CapabilityDiscoveryEnabled ($capabilityEnabled -or $vendorDiscoveryEnabled) `
+        -MultiAdminReadOnlyEnabled $multiAdminEnabled `
+        -MultiAdminECMEnabled $multiAdminEcmEnabled `
         -LightStateVerificationEnabled $lightStateVerificationEnabled `
         -LightControlMode $lightMode `
         -TemporaryOnAllowed ([bool]$AllowTemporaryOn) `
@@ -782,11 +1239,131 @@ done
     if (-not $devicesResult.Analysis.target_found) {
         throw "GET /devices returned valid JSON, but target Matter Node ID $InventoryTargetNodeId was not found; see devices_structure.json"
     }
-    if (-not $inventoryEnabled -and -not $devicesResult.Analysis.target_endpoint_found) {
-        throw "GET /devices found Matter Node ID $InventoryTargetNodeId, but no usable endpoint was advertised; see devices_structure.json"
+    if($multiAdminEcmEnabled){
+        [void](Resolve-MaindEcmTargetFromDevices -Context $ecmContext -DevicesJson $devicesBody)
+    }
+    if (-not $inventoryEnabled -and -not $multiAdminEnabled -and -not $multiAdminEcmEnabled -and
+        -not $devicesResult.Analysis.target_endpoint_found) {
+        throw "GET /devices found Matter Node ID $InventoryTargetNodeId, but endpoint 1 was not advertised; see devices_structure.json"
     }
 
-    if($inventoryEnabled){
+    if($multiAdminEcmEnabled){
+        if($ecmTransportProbeOnly){
+            $probeRequest=Get-MaindEcmReadRequestJson $ecmContext.ResolvedNodeId 60 0
+            $probeResponse=Invoke-RemoteLoopbackHttpRequest -Method POST -Path '/interaction/readAttribute' `
+                -EvidenceName 'ecm_transport_probe_window_status' -RequestBody $probeRequest `
+                -TimeoutSec 30 -RequireSuccess $true -MultiAdminECMEnabled $true
+            $probeAttribute=Get-MaindAttributeResult -JsonText $probeResponse.Body `
+                -ClusterId 60 -AttributeId 0 -EndpointId 0
+            if(-not$probeAttribute.supported){throw 'WindowStatus read-only transport probe was not supported.'}
+            $probeTlv=ConvertFrom-MaindMatterTlv -RawValue ([string]$probeAttribute.value.rawValue) -Root $root
+            $probeWindowStatus=Get-MaindUnsignedScalarFromTlv $probeTlv
+            if([int]$probeWindowStatus-ne0){throw "WindowStatus read-only transport probe expected 0, received $probeWindowStatus."}
+            [ordered]@{
+                mode='MultiAdminECMTransportProbeOnly';node_id=$ecmContext.ResolvedNodeId
+                request_count=1;cluster_id=60;attribute_id=0;window_status=[int]$probeWindowStatus
+                commissioning_window_post=$false;matterjs_commission=$false
+            }|ConvertTo-Json|Set-Content -Encoding utf8NoBOM `
+                (Join-Path $resultDir 'ecm_transport_probe.private.json')
+        }else{
+        $baseline=[ordered]@{mode='MultiAdminECM';node_id=$ecmContext.ResolvedNodeId;before=[ordered]@{};after=[ordered]@{}}
+        foreach($spec in @(Get-MaindEcmBaselineReadPlan -NodeId $ecmContext.ResolvedNodeId)){
+            $request=Get-MaindEcmReadRequestJson $ecmContext.ResolvedNodeId $spec.clusterId $spec.attributeId
+            $response=Invoke-RemoteLoopbackHttpRequest -Method POST -Path '/interaction/readAttribute' `
+                -EvidenceName ("ecm_before_"+$spec.name) -RequestBody $request -TimeoutSec 30 -RequireSuccess $true `
+                -MultiAdminECMEnabled $true
+            $attribute=Get-MaindAttributeResult -JsonText $response.Body -ClusterId $spec.clusterId -AttributeId $spec.attributeId -EndpointId 0
+            if(-not$attribute.supported){throw "Required ECM baseline read failed: $($spec.name)"}
+            $decoded=ConvertFrom-MaindMatterTlv -RawValue ([string]$attribute.value.rawValue) -Root $root
+            $value=if($spec.kind-eq'list'){,@(Get-MaindUnsignedListFromTlv $decoded)}else{Get-MaindUnsignedScalarFromTlv $decoded}
+            $baseline.before[$spec.name]=$value
+        }
+        if((@($baseline.before.accepted_command_list)-join',')-cne'0,1,2'){throw 'Device does not advertise exact Administrator Commissioning commands [0,1,2].'}
+        if([int]$baseline.before.window_status-ne0){throw 'Commissioning window is already open; refusing one-shot ECM.'}
+        if([int]$baseline.before.commissioned_fabrics-ne1){throw 'Baseline CommissionedFabrics is not exactly 1.'}
+        if([int]$baseline.before.supported_fabrics-ne5){throw 'Baseline SupportedFabrics is not exactly 5.'}
+        $baseline|ConvertTo-Json -Depth 12|Set-Content -Encoding utf8NoBOM (Join-Path $resultDir 'ecm_baseline.private.json')
+
+        $script:EcmCurrentPhase='Post'
+        [void](Get-MaindEcmBoundedTimeoutMilliseconds -Timing $ecmTiming -LocalTimeoutSeconds 90 -Phase Post -MinimumRemainingSeconds 90)
+        $windowRequest=Get-MaindEcmWindowRequestJson -Context $ecmContext
+        $window=Invoke-MaindEcmWindowPostSecure -RequestBody $windowRequest `
+            -ClaimPath (Join-Path $resultDir 'commissioning_window_post.claimed.json')
+        $windowRead=Invoke-RemoteLoopbackHttpRequest -Method POST -Path '/interaction/readAttribute' `
+            -EvidenceName 'ecm_after_window_status' -RequestBody (Get-MaindEcmReadRequestJson $ecmContext.ResolvedNodeId 60 0) `
+            -TimeoutSec 30 -RequireSuccess $true -MultiAdminECMEnabled $true
+        $windowAttribute=Get-MaindAttributeResult $windowRead.Body 60 0 0
+        $windowTlv=ConvertFrom-MaindMatterTlv -RawValue ([string]$windowAttribute.value.rawValue) -Root $root
+        $baseline.after.window_status=Get-MaindUnsignedScalarFromTlv $windowTlv
+        if([int]$baseline.after.window_status-eq0){throw 'Dedicated route returned success but WindowStatus remained 0.'}
+
+        $script:EcmCurrentPhase='Commissioning'
+        [void](Get-MaindEcmBoundedTimeoutMilliseconds -Timing $ecmTiming `
+            -LocalTimeoutSeconds ($MatterJsDiscoveryTimeoutSeconds+70) -Phase Commissioning `
+            -MinimumRemainingSeconds ($MatterJsDiscoveryTimeoutSeconds+70))
+        [void](Invoke-MatterServerCommissionWithCodeSecure -ManualCode $window.ManualCode `
+            -ClaimPath (Join-Path $resultDir 'matterjs_commission.claimed.json'))
+        # Erase references promptly; neither code is written to disk.
+        $window=$null
+        [GC]::Collect()
+        $script:EcmCurrentPhase='Readback'
+        [void](Get-MaindEcmBoundedTimeoutMilliseconds -Timing $ecmTiming -LocalTimeoutSeconds 120 -Phase Readback -MinimumRemainingSeconds 120)
+        $nodesAfter=Get-MatterServerNodeCountSecure -Phase 'after' -DeadlinePhase 'Readback'
+        if($nodesAfter-ne1){throw "Matter.js commissioning returned, but get_nodes count is $nodesAfter instead of 1."}
+        foreach($item in @(
+            @{cluster=62;attribute=3;name='commissioned_fabrics'},
+            @{cluster=60;attribute=0;name='window_status'}
+        )){
+            $request=Get-MaindEcmReadRequestJson $ecmContext.ResolvedNodeId $item.cluster $item.attribute
+            $response=Invoke-RemoteLoopbackHttpRequest -Method POST -Path '/interaction/readAttribute' `
+                -EvidenceName ("ecm_after_"+$item.name) -RequestBody $request -TimeoutSec 30 -RequireSuccess $true -MultiAdminECMEnabled $true
+            $attribute=Get-MaindAttributeResult $response.Body $item.cluster $item.attribute 0
+            $decoded=ConvertFrom-MaindMatterTlv -RawValue ([string]$attribute.value.rawValue) -Root $root
+            $baseline.after[$item.name]=Get-MaindUnsignedScalarFromTlv $decoded
+        }
+        $baseline|ConvertTo-Json -Depth 12|Set-Content -Encoding utf8NoBOM (Join-Path $resultDir 'ecm_reconciliation.private.json')
+        if([int]$baseline.after.commissioned_fabrics-ne2){throw 'Matter.js returned but CommissionedFabrics did not become 2.'}
+        }
+    } elseif($multiAdminEnabled){
+        $multiAdminPlan=@(Get-MaindMultiAdminReadPlan -NodeId $InventoryTargetNodeId)
+        if($multiAdminPlan.Count -ne 11){throw 'MultiAdminReadOnly plan must contain exactly 11 reads'}
+        $uniquePairs=@($multiAdminPlan|ForEach-Object{"$($_.clusterId)/$($_.attributeId)"}|Select-Object -Unique)
+        if($uniquePairs.Count -ne 11){throw 'MultiAdminReadOnly plan contains duplicate reads'}
+        $multiAdminResult=[ordered]@{
+            mode='MultiAdminReadOnly'; node_id=$InventoryTargetNodeId; endpoint_id=0
+            request_count=11; attributes=[ordered]@{}
+        }
+        foreach($spec in $multiAdminPlan){
+            $request=Get-MaindMultiAdminReadRequestJson -NodeId $InventoryTargetNodeId `
+                -ClusterId $spec.clusterId -AttributeId $spec.attributeId
+            $response=Invoke-RemoteLoopbackHttpRequest -Method POST `
+                -Path '/interaction/readAttribute' -EvidenceName $spec.name `
+                -RequestBody $request -TimeoutSec 30 -RequireSuccess $true `
+                -MultiAdminReadOnlyEnabled $true
+            $attribute=Get-MaindAttributeResult -JsonText $response.Body `
+                -ClusterId $spec.clusterId -AttributeId $spec.attributeId -EndpointId 0
+            $attribute.parsed|ConvertTo-Json -Depth 30|Set-Content -Encoding UTF8 `
+                (Join-Path $resultDir "$($spec.name).parsed.json")
+            if(-not $attribute.supported){
+                throw "Required read failed for cluster $($spec.clusterId) attribute $($spec.attributeId)"
+            }
+            $decoded=ConvertFrom-MaindMatterTlv -RawValue ([string]$attribute.value.rawValue) -Root $root
+            $decoded|ConvertTo-Json -Depth 50|Set-Content -Encoding UTF8 `
+                (Join-Path $resultDir "$($spec.name).tlv.json")
+            $value=switch($spec.kind){
+                'list' {,@(Get-MaindUnsignedListFromTlv $decoded); break}
+                'scalar' {Get-MaindUnsignedScalarFromTlv $decoded; break}
+                'nullable' {Get-MaindNullableUnsignedScalarFromTlv $decoded; break}
+                default {throw "Unknown MultiAdminReadOnly decoder kind: $($spec.kind)"}
+            }
+            $multiAdminResult.attributes[$spec.name]=[ordered]@{
+                cluster_id=[UInt64]$spec.clusterId; attribute_id=[UInt64]$spec.attributeId
+                kind=[string]$spec.kind; value=$value
+            }
+        }
+        $multiAdminResult|ConvertTo-Json -Depth 30|Set-Content -Encoding UTF8 `
+            (Join-Path $resultDir 'multi_admin_readiness.private.json')
+    } elseif($inventoryEnabled){
         $inventoryResult=Invoke-MaindFullInventory -Context $inventoryContext `
             -DevicesResult $devicesResult -ResultDirectory $resultDir -Root $root `
             -MaxRequests $InventoryMaxRequests -MaxTotalBytes $InventoryMaxTotalBytes `
@@ -1292,6 +1869,12 @@ done
 
     $completionReason = if($inventoryEnabled){
         'completed_read_only_full_inventory'
+    } elseif($multiAdminEnabled){
+        'completed_multi_admin_read_only'
+    } elseif($multiAdminEcmEnabled -and $ecmTransportProbeOnly){
+        'completed_multi_admin_ecm_transport_probe'
+    } elseif($multiAdminEcmEnabled){
+        'completed_multi_admin_ecm'
     } elseif ($controlEnabled) {
         'completed_control_change_and_verified_restore'
     } elseif ($lightControlEnabled) {
@@ -1305,11 +1888,12 @@ done
     } else {
         'completed_read_only_checks'
     }
-    Invoke-Ssh "$remoteHelperCommand rollback $completionReason"
-    Invoke-Ssh "$remoteHelperCommand verify-clean"
-    $finalStatus=(Invoke-Ssh "$remoteHelperCommand status"|Out-String)
+    $script:EcmCurrentPhase=if($multiAdminEcmEnabled){'Rollback'}else{$script:EcmCurrentPhase}
+    Invoke-Ssh -Command "$remoteHelperCommand rollback $completionReason" -TimeoutSeconds 120 -Phase $script:EcmCurrentPhase
+    Invoke-Ssh -Command "$remoteHelperCommand verify-clean" -TimeoutSeconds 60 -Phase $script:EcmCurrentPhase
+    $finalStatus=(Invoke-Ssh -Command "$remoteHelperCommand status" -TimeoutSeconds 30 -Phase $script:EcmCurrentPhase|Out-String)
     $finalStatus|Set-Content -Encoding UTF8 (Join-Path $resultDir "final_status.txt")
-    if($inventoryEnabled){
+    if($inventoryEnabled -or $multiAdminEnabled -or $multiAdminEcmEnabled){
         [ordered]@{verified_clean=($finalStatus-match'completed=yes'-and$finalStatus-match'guard4=no'-and$finalStatus-match'guard6=no'-and$finalStatus-match'patch_mount=no');raw_status_file='final_status.txt';completed_utc=[DateTime]::UtcNow.ToString('o')}|ConvertTo-Json|Set-Content -Encoding UTF8 (Join-Path $resultDir 'postflight.json')
     }
     if($lightStateVerificationEnabled){
@@ -1336,6 +1920,19 @@ done
     }
 } catch {
     $controllerError = Format-ExceptionChain $_.Exception
+    if($multiAdminEcmEnabled){$controllerError=Protect-MaindEcmDiagnosticText $controllerError}
+    if($multiAdminEcmEnabled -and $activationCommandIssued -and $helperValidated){
+        # Rollback has priority over diagnostics. Claim before transport so an
+        # SSH timeout never causes an automatic second rollback command; the
+        # independent station-side watchdog remains the final authority.
+        $script:EcmCurrentPhase='Rollback'
+        Request-Rollback 'ecm_controller_error'
+    }
+    if($multiAdminEcmEnabled -and $null-ne$ecmContext -and $ecmContext.WindowPostClaimed -and $activationCommandIssued){
+        [ordered]@{post_retried=$false;commission_retried=$false;state_ambiguous=$true;
+            read_only_reconciliation_skipped='rollback_priority'}|ConvertTo-Json|Set-Content -Encoding utf8NoBOM `
+            (Join-Path $resultDir 'ecm_error_reconciliation.private.json')
+    }
     $controllerError | Set-Content -Encoding UTF8 (Join-Path $resultDir "controller_error.txt")
     if ($brightnessEnabled -and $lightMutationMayHaveOccurred -and
         -not $restorationVerified -and $null -ne $lightInitialOnOff -and
@@ -1400,7 +1997,7 @@ done
             Write-Warning 'OnOff restoration could not be verified; lamp state may remain changed.'
         }
     }
-    if ($activationCommandIssued -and $helperValidated) {
+    if ($activationCommandIssued -and $helperValidated -and -not($multiAdminEcmEnabled -and $rollbackRequestClaimed)) {
         try {
             (Invoke-Ssh "$remoteHelperCommand http-diagnostics controller_error" | Out-String) |
                 Set-Content -Encoding UTF8 (Join-Path $resultDir "remote_http_diagnostics_command.txt")
@@ -1415,9 +2012,9 @@ done
         Request-Rollback "controller_error"
         if ($lightControlEnabled) {
             try {
-                & $ssh -o BatchMode=yes $SshAlias `
-                    "test ! -f '$remoteBase/LIGHT_STATE_MAY_BE_CHANGED'"
-                if ($LASTEXITCODE -ne 0) {
+                $markerAbsent=$true
+                try{Invoke-Ssh -Command "test ! -f '$remoteBase/LIGHT_STATE_MAY_BE_CHANGED'" -TimeoutSeconds 30}catch{$markerAbsent=$false}
+                if (-not$markerAbsent) {
                     [ordered]@{restoration_verified=$false;possible_lamp_state_changed=$true;
                         mode=$lightMode}|ConvertTo-Json|Set-Content -Encoding UTF8 `
                         (Join-Path $resultDir 'LIGHT_STATE_MAY_BE_CHANGED.json')
@@ -1438,6 +2035,9 @@ done
         } catch {
             Write-Warning "Could not retrieve remote runtime logs: $_"
         }
+    }
+    if($nativeHttpClientUploaded){
+        try{Remove-NativeHttpClient}catch{Write-Warning "Could not remove run-scoped native HTTP client: $_"}
     }
 }
 

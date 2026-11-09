@@ -7,6 +7,7 @@ Matter state. It never opens a network connection.
 """
 from __future__ import annotations
 
+import base64
 import hashlib
 import io
 import json
@@ -85,13 +86,21 @@ def read_fixture(state, cluster, attribute):
     return dynamic.get((cluster, attribute), fixed.get((cluster, attribute)))
 
 
-def http_response(command: str):
+def http_response(command: str, raw_http: bytes | None = None):
     state = load_state()
     state["http_count"] += 1
-    url_match = re.findall(r"'http://127\.0\.0\.1:8765([^']*)'", command)
-    path = url_match[-1] if url_match else ""
-    body_match = re.search(r"--post-data='([^']*)'", command)
-    request = json.loads(body_match.group(1)) if body_match else None
+    if raw_http is not None:
+        head, raw_body = raw_http.split(b"\r\n\r\n", 1)
+        first = head.split(b"\r\n", 1)[0].decode("ascii")
+        method, path, version = first.split(" ")
+        if method != "POST" or version != "HTTP/1.1":
+            raise ValueError("mock raw HTTP request line mismatch")
+        request = json.loads(raw_body.decode("utf-8"))
+    else:
+        url_match = re.findall(r"'http://127\.0\.0\.1:8765([^']*)'", command)
+        path = url_match[-1] if url_match else ""
+        body_match = re.search(r"--post-data='([^']*)'", command)
+        request = json.loads(body_match.group(1)) if body_match else None
     fault = state.get("fault", "none")
     status, reason = 200, "Ok"
     response = None
@@ -230,6 +239,24 @@ def main():
         if exit_code: return exit_code
         if headers is not None: sys.stderr.write(headers)
         if body: sys.stdout.buffer.write(body)
+        return 0
+    if "/bin/busybox telnet 127.0.0.1 8765" in command:
+        encoded = re.search(r"printf '%s' '([A-Za-z0-9+/=]+)'", command)
+        if not encoded:
+            return 2
+        body, headers, exit_code = http_response(command, base64.b64decode(encoded.group(1)))
+        if exit_code or headers is None:
+            sys.stderr.write("__MAIND_TELNET_EXIT__=1\n")
+            return 0
+        status = re.search(r"HTTP/1\.1 ([1-5][0-9]{2}) ([^\n]+)", headers)
+        raw = (
+            f"HTTP/1.1 {status.group(1)} {status.group(2).strip()}\r\n"
+            "Content-Type: application/json\r\n"
+            f"Content-Length: {len(body)}\r\n"
+            "Connection: close\r\n\r\n"
+        ).encode("ascii") + body
+        sys.stdout.buffer.write(raw)
+        sys.stderr.write("__MAIND_TELNET_EXIT__=0\n")
         return 0
     base = parse_base(command)
     base_path = remote_path(base)
