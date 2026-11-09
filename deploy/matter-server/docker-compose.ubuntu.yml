@@ -1,0 +1,18 @@
+services:
+  matter-server:
+    image: yandex-matterjs-server:1.5.5-direct-v1
+    container_name: matterjs-server
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      STORAGE_PATH: /data
+      PRIMARY_INTERFACE: enp5s0
+      ENABLE_TEST_NET_DCL: "true"
+      DISABLE_AUTO_SUBSCRIPTION: "true"
+      YNDX00560_DIRECT_INVOKE_NODE_ID: "2"
+      LISTEN_ADDRESS: 127.0.0.1,enp5s0
+      LOG_LEVEL: info
+      MATTER_LOG_FORMAT: plain
+      TZ: Europe/Moscow
+    volumes:
+      - ./matter-data:/data
