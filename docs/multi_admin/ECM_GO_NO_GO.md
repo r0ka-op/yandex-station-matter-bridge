@@ -8,10 +8,11 @@
 
 - **NO-GO** для `OpenCommissioningWindow` через generic
   `POST /interaction/invokeCommand`.
-- **CONDITIONAL GO** для одного отдельно разрешённого
-  `POST /commissioning/window` после прежнего guarded lifecycle preflight.
-- **NOT TESTED** — dedicated route ещё не вызывался на реальной
-  Станции; commissioning window не открывалось.
+- **HARDWARE PASS** для одного отдельно разрешённого
+  `POST /commissioning/window` после guarded lifecycle preflight.
+- **CONFIRMED** — dedicated route открыл окно на реальной Станции;
+  PASE, DeviceAttestation, AddNOC и CommissioningComplete прошли, вторая Fabric
+  сохранена.
 
 ## Почему generic invoke отклонён
 

@@ -87,7 +87,8 @@ setup PIN/salt. SDK сам:
 INFERRED — dedicated route минимизирует риск ошибки: verifier/salt
 не проходят через JSON, криптография остаётся в штатном SDK.
 
-NOT TESTED — route не вызывался на реальной Станции.
+CONFIRMED — route успешно вызван на реальной Станции; SDK создал временный code,
+а PASE, DeviceAttestation, AddNOC и CommissioningComplete завершились успешно.
 
 ## Matter.js Server
 

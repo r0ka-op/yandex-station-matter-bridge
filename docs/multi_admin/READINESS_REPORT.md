@@ -10,7 +10,7 @@
 - **CONFIRMED** — исходное активное состояние восстановлено. EnhancedColorMode нормализован устройством с несогласованного `2` при ColorMode=`0` на согласованный `0` после стандартной смены режима.
 - **CONFIRMED** — автоматический bootstrap Read/subscription Matter.js 0.18.0 несовместим с лампой (`peer-ack-missing` до SubscribeRequest). Используется официальный `DISABLE_AUTO_SUBSCRIPTION=true` и bounded direct polling.
 - **CONFIRMED** — узкий build-time patch разрешает direct invoke только для node из env, endpoint `1` и пяти световых команд; произвольный invoke/write не добавлен.
-- **NOT EXECUTED** — тест при недоступной Яндекс Станции, поскольку безопасная изоляция потребовала бы отдельного изменения сети.
+- **CONFIRMED (2026-11-10)** — при физически обесточенной Яндекс Станции прошли CASE, Direct Read, Off/On, brightness, Hue/Saturation, восстановление исходного ColorTemperature/ColorMode и polling. Финальный snapshot совпал с исходным; после включения Станции независимый path остался healthy.
 
 Подробности, команды, восстановление и аппаратные результаты: [DIRECT_CONTROL.md](DIRECT_CONTROL.md). Публичный inventory: [YNDX00560_INVENTORY.json](YNDX00560_INVENTORY.json).
 
@@ -27,8 +27,8 @@
   `nodeId`, `discriminator`, `timeout`; CHIP SDK сам генерирует PIN,
   32-byte salt, PAKE verifier, ECM TLV и timed invoke.
 - CONDITIONAL GO — один separately authorized call этого dedicated route.
-- NOT TESTED — real route call, commissioning и вторая Fabric ещё не
-  проверены.
+- CONFIRMED — real route call, commissioning и вторая Fabric впоследствии
+  подтверждены на оборудовании; этот пункт заменяет исходный preflight verdict.
 
 Актуальный verdict: [ECM_GO_NO_GO.md](ECM_GO_NO_GO.md); доказательства:
 [MAIND_TIMED_INVOKE_ANALYSIS.md](MAIND_TIMED_INVOKE_ANALYSIS.md).
@@ -96,7 +96,7 @@ Production-клиент `ymatter` не изменять и его запрет �
 | `maind` Timed Invoke | UNKNOWN | нет wire evidence корректного Timed Request |
 | `maind` octet strings | UNKNOWN | encoding verifier/salt не установлен |
 | Matter.js Server | CONFIRMED | healthy, WebSocket API работает, 0 узлов |
-| Реальный Multi-Admin YNDX-00560 | NOT TESTED | read-only hardware baseline подтверждён; открытие окна и добавление fabric не выполнялись |
+| Реальный Multi-Admin YNDX-00560 | HARDWARE PASS | окно, PASE, attestation, AddNOC, CommissioningComplete и вторая Fabric подтверждены |
 
 ## Фактическое состояние стенда
 

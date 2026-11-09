@@ -2,10 +2,10 @@
 
 ## Статус
 
-CONDITIONAL GO — технические blockers Timed Invoke и binary
-verifier/salt устранены через штатный
-`POST /commissioning/window`. Сам вызов ещё NOT TESTED и требует нового
-явного разрешения.
+HARDWARE PASS — технические blockers Timed Invoke и binary verifier/salt
+устранены через штатный `POST /commissioning/window`. План выполнен один раз:
+окно, PASE, attestation, AddNOC, CommissioningComplete, rollback и verify-clean
+подтверждены. Для любого нового вызова по-прежнему требуется отдельное разрешение.
 
 NO-GO — не использовать `/interaction/invokeCommand` для cluster
 `0x003C`: JSON parser не имеет такой dispatch branch.

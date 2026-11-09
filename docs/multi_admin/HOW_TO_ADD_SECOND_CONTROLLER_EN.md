@@ -16,7 +16,7 @@ flowchart LR
     H2[Home Assistant<br/>own Fabric] -. new window, option 2 .-> L
 ```
 
-Matter.js Server is a standalone Matter controller and WebSocket service. Home Assistant is an automation platform that can use an existing Matter Server or operate its own Fabric. The second Fabric provides an independent `Linux → Matter.js → lamp` path. Direct Read, On/Off, brightness, Hue/Saturation, and color temperature were verified. Operation while the Station is physically offline remains **NOT TESTED**.
+Matter.js Server is a standalone Matter controller and WebSocket service. Home Assistant is an automation platform that can use an existing Matter Server or operate its own Fabric. The second Fabric provides an independent `Linux → Matter.js → lamp` path. Direct Read, On/Off, brightness, Hue/Saturation, color temperature, and polling were also verified while the Station was physically powered off.
 
 ## 2. Verified versions and requirements
 
@@ -350,4 +350,4 @@ Project tooling uses a route allowlist, guards before the listener, a 1500-secon
 
 **Can Home Assistant be used immediately?** The two architectures in section 9 are possible, but neither has completed an end-to-end hardware test in this exact setup.
 
-**Was operation with the Yandex Station offline verified?** No. The independent Matter path works, but the physical Station-offline test is **NOT EXECUTED**.
+**Was operation with the Yandex Station offline verified?** Yes. CASE, Direct Read, On/Off, brightness, Hue/Saturation, and polling passed while the Station was physically powered off; the initial lamp state was restored. The independent path remained healthy after the Station returned.
