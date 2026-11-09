@@ -4,12 +4,13 @@
 
 - Реальная лампа объявляет OpenCommissioningWindow, OpenBasicCommissioningWindow и
   RevokeCommissioning — CONFIRMED.
-- Свободно четыре fabric slots — CONFIRMED/INFERRED, но добавление fabric NOT TESTED.
+- Свободно четыре fabric slots было подтверждено до теста; добавление второй Fabric
+  впоследствии завершено успешно — HARDWARE PASS.
 - Безопасный предпочтительный путь по стандарту существует: ECM с временным кодом — SOURCE.
-- Возможность передать ECM через `maind` UNKNOWN: byte strings и Timed Invoke не доказаны.
+- Generic invoke через `maind` остался NO-GO, но штатный dedicated
+  `/commissioning/window` использует CommissioningWindowOpener и подтверждён на железе.
 - У Яндекса не найден документированный UI «поделиться Matter-устройством» для Эмби Лампы.
-- Публичного подтверждённого успешного Multi-Admin именно YNDX-00560 не найдено — UNKNOWN,
-  а не доказательство невозможности.
+- Этот проект получил подтверждённый успешный Multi-Admin именно YNDX-00560.
 
 ## Фактическая база
 

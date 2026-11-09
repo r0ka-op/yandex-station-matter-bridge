@@ -1,6 +1,6 @@
 # Независимое управление YNDX-00560
 
-Дата аппаратной проверки: 2026-11-09.
+Даты аппаратных проверок: 2026-11-09 и финальная проверка независимости 2026-11-10.
 
 ## Результат
 
@@ -10,7 +10,7 @@
 - **CONFIRMED** — после контролируемого перезапуска проверены Off, On, яркость, Hue/Saturation и ColorTemperature с отдельным чтением фактического состояния.
 - **CONFIRMED** — автоматический bootstrap Read/subscription данной лампы несовместим с Matter.js 0.18.0: объединённый wildcard-запрос атрибутов и событий завершается `peer-ack-missing` до SubscribeRequest.
 - **CONFIRMED** — рабочий production-путь использует официальный `DISABLE_AUTO_SUBSCRIPTION=true`, ограниченный direct invoke внутри единственного Matter.js Server и bounded polling через прямые Read.
-- **NOT EXECUTED** — аппаратная проверка при физически/сетево недоступной Яндекс Станции: безопасная изоляция требовала бы отдельного изменения сети.
+- **CONFIRMED** — при физически обесточенной Яндекс Станции прошли CASE, Direct Read, Off/On, brightness, Hue/Saturation, восстановление режима ColorTemperature и polling. После включения Станции Matter.js остался healthy, node доступен, конфликт Fabrics не обнаружен.
 
 `available` в `get_nodes` не считается показателем здоровья подписки. Клиент отдельно сообщает наличие node, значение `available`, успешность direct read и режим `disabled-polling`.
 
@@ -90,7 +90,36 @@ node tools/matter_lamp/matter-lamp-client.mjs set_color_temperature 4000
 | Subscription | FAIL | `peer-ack-missing` на bootstrap Read; отключена |
 | Fallback polling | PASS | пять последовательных direct Read: `139/69/86/175/31 ms` |
 
-Финальный активный state совпал с snapshot: OnOff=`true`, level=`254`, hue/saturation=`52/244`, X/Y=`24939/24701`, temperature=`154`, ColorMode=`0`. EnhancedColorMode изменился с исторически несогласованного `2` при ColorMode=`0` на согласованный `0` после стандартного переключения режимов; дополнительных слепых команд для возврата этого служебного значения не отправлялось.
+### Финальная проверка независимости — 2026-11-10
+
+Перед отключением Станции сохранён свежий snapshot: OnOff=`true`, level=`254`,
+hue/saturation=`52/244`, X/Y=`24939/24701`, temperature=`222` mired,
+ColorMode/EnhancedColorMode=`2/2`. Станция была физически обесточена; SSH к ней
+завершался timeout, при этом Ubuntu и Wi-Fi оставались доступны.
+
+| Проверка без Станции | Результат | Readback |
+|---|---|---|
+| CASE/Direct Read | PASS | node present/available, OnOff=`true` |
+| Off → On | PASS | `false` → `true` |
+| Brightness 50% → restore | PASS | level `127` → `254` |
+| Hue/Saturation test | PASS | `38/203`, ColorMode=`0` |
+| Restore hue/saturation | PASS | `52/244` |
+| Restore color mode/temperature | PASS | `222` mired, ColorMode=`2` |
+| Polling | PASS | два последовательных полных snapshot совпали |
+| Persistence/node status | PASS | container healthy, restart count `0`, `/data` present |
+| Final snapshot | PASS | полностью совпал с исходным snapshot |
+
+После физического включения Станции штатный `platformd` восстановился, TCP/8765
+остался закрыт, а CASE/Direct Read Matter.js продолжили работать. Управляющая команда
+через Яндекс Fabric отдельно не отправлялась; её сохранность подтверждается ранее
+проверенным coexistence и отсутствием признаков конфликта после возврата Станции.
+
+В первичной проверке 2026-11-09 финальный активный state совпал с snapshot:
+OnOff=`true`, level=`254`, hue/saturation=`52/244`, X/Y=`24939/24701`,
+temperature=`154`, ColorMode=`0`. EnhancedColorMode изменился с исторически
+несогласованного `2` при ColorMode=`0` на согласованный `0` после стандартного
+переключения режимов; дополнительных слепых команд для возврата этого служебного
+значения не отправлялось.
 
 ## Восстановление
 
