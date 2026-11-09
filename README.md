@@ -1,5 +1,14 @@
 # Yandex Station Matter HTTP API and `ymatter`
 
+## Подключение второго Matter-контроллера / Matter Multi-Admin
+
+Яндекс Эмби Лампа YNDX-00560 успешно добавлена в независимую Matter.js Fabric без удаления существующей Яндекс Fabric. Воспроизводимая инструкция описывает защищённое открытие commissioning window, аттестацию, восстановление из persistence, прямое управление и обязательный rollback Станции:
+
+- [Инструкция на русском](docs/multi_admin/HOW_TO_ADD_SECOND_CONTROLLER.md)
+- [English guide](docs/multi_admin/HOW_TO_ADD_SECOND_CONTROLLER_EN.md)
+
+Подтверждены Direct Read, On/Off, яркость, Hue/Saturation, ColorTemperature, polling и восстановление после перезапуска. Полная Home Assistant-интеграция и работа при физически отключённой Станции пока не проверены.
+
 ## Независимое Matter-управление YNDX-00560
 
 Эмби Лампа YNDX-00560 успешно добавлена во вторую Matter Fabric с сохранением
