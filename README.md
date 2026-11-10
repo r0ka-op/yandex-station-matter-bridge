@@ -1,5 +1,14 @@
 # Yandex Station Matter HTTP API and `ymatter`
 
+## Independent Yandex Ambi Lamp control — illustrated guides
+
+**Русский:** [Начать с наглядной схемы и выбрать свой путь](docs/guide/00_START_RU.md) · **English:** [Start with the visual guide](docs/guide/00_START_EN.md)
+
+The guides lead through preparation → one-time Matter Multi-Admin pairing → verified lamp controls and scenes → safe troubleshooting. Built entirely with GitHub Markdown, Mermaid diagrams, copyable commands, expected outputs and quick decision paths. No separate documentation website is required.
+
+**Prerequisite:** Mini 2 with pre-existing root/SSH. No private addresses, Node IDs, credentials, pairing codes or Fabric storage are published.
+
+
 ## Подключение второго Matter-контроллера / Matter Multi-Admin
 
 Яндекс Эмби Лампа YNDX-00560 успешно добавлена в независимую Matter.js Fabric без удаления существующей Яндекс Fabric. Воспроизводимая инструкция описывает защищённое открытие commissioning window, аттестацию, восстановление из persistence, прямое управление и обязательный rollback Станции:
@@ -170,7 +179,7 @@ Bridge публикует MQTT Discovery и состояние с readback. Эт
 | Color Temperature через `ymatter` | **OFFLINE TESTED / hardware NOT TESTED** |
 | Постоянно включённый API | **NOT SUPPORTED / unsafe by default** |
 | Реальный Home Assistant bridge | **NOT TESTED** |
-| Второй независимый Matter-контроллер | **NOT CONFIRMED** |
+| Второй независимый Matter-контроллер (Matter.js) | **CONFIRMED** на реальном устройстве; отдельный от Python-клиента |
 
 Offline-тесты не заменяют аппаратную проверку. План одного ограниченного сеанса: [client/reports/REAL_CLIENT_TEST_PLAN.md](client/reports/REAL_CLIENT_TEST_PLAN.md).
 
