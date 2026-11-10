@@ -278,6 +278,24 @@ Hue and saturation are percentages. Use the temperature range returned by `get_c
 
 Hardware PASS: Direct Read, On/Off, brightness, Hue/Saturation, ColorTemperature, polling, persistence recovery, and operation after restart. Auto-subscription fails during a combined bootstrap Read before SubscribeRequest (`peer-ack-missing`), so the image disables auto-subscription and uses bounded direct reads/polling. `available=false` does not mean CASE or Direct Read failed.
 
+### Built-in scenes through the independent Fabric
+
+```bash
+node tools/matter_lamp/matter-lamp-client.mjs --uri ws://<MATTER_SERVER_IP>:5580/ws --node <OPERATIONAL_NODE_ID> get_scenes
+node tools/matter_lamp/matter-lamp-client.mjs --uri ws://<MATTER_SERVER_IP>:5580/ws --node <OPERATIONAL_NODE_ID> get_scene
+node tools/matter_lamp/matter-lamp-client.mjs --uri ws://<MATTER_SERVER_IP>:5580/ws --node <OPERATIONAL_NODE_ID> set_scene rainbow
+node tools/matter_lamp/matter-lamp-client.mjs --uri ws://<MATTER_SERVER_IP>:5580/ws --node <OPERATIONAL_NODE_ID> set_scene fire
+node tools/matter_lamp/matter-lamp-client.mjs --uri ws://<MATTER_SERVER_IP>:5580/ws --node <OPERATIONAL_NODE_ID> set_scene northern_lights
+node tools/matter_lamp/matter-lamp-client.mjs --uri ws://<MATTER_SERVER_IP>:5580/ws --node <OPERATIONAL_NODE_ID> set_scene lava_lamp
+```
+
+The command uses endpoint `1`, ModeSelect `0x0050`, ChangeToMode `0x00`, and a
+closed allowlist of IDs `1,4,6,13`. `get_scene` does not report the retained ID
+as an active scene while the lamp is off or the vendor category is not `Scene`.
+This firmware returns an empty string instead of a list for `SupportedModes`,
+so `get_scenes` reports `deviceListAvailable=false` and separately lists only
+hardware-verified modes rather than all 24 values of the general Quasar enum.
+
 ## 9. Home Assistant
 
 ### Option 1: use the existing Matter.js Server

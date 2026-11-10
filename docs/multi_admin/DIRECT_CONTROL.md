@@ -38,7 +38,17 @@ Endpoint `1` имеет клиентский Scenes cluster `0x0050`. Всего
 
 ColorControl: FeatureMap=`25`, ColorCapabilities=`25`, физический диапазон `154..370` mired (примерно `6494..2703 K`). На момент свежего snapshot: level `254`, hue `52`, saturation `244`, X/Y `24939/24701`, temperature `154` mired, ColorMode `0`.
 
-Vendor clusters исследованы только read-only. Один из них публикует режимы пользовательского интерфейса `Color`, `Scene`, `Color music`, `None`. Их команды, семантика и безопасность не подтверждены; production-клиент их не вызывает.
+Vendor-категория `0x132FFC0C` публикует режимы интерфейса `None`, `Color`,
+`Scene`, `Color music`. Селектор штатных сцен оказался стандартным Matter
+ModeSelect `0x0050`, command `ChangeToMode(0)`, payload `{newMode:uint8}`.
+Аппаратно подтверждены `lava_lamp=1`, `fire=4`, `northern_lights=6` и
+`rainbow=13`. Остальные значения общего Quasar enum не вызываются.
+
+`SupportedModes (0x0000)` на проверенной лампе возвращает пустую строку вместо
+списка `ModeOptionStruct`, а `CurrentMode (0x0001)` — `0`. Последний выбранный
+scene ID хранится в `OnMode (0x0003)`. Поэтому клиент отдельно сообщает
+`lastSelectedSceneId` и считает сцену активной только при `OnOff=true` и vendor
+category `Scene=2`.
 
 ## Исправление Matter.js
 
@@ -69,6 +79,12 @@ node tools/matter_lamp/matter-lamp-client.mjs turn_on
 node tools/matter_lamp/matter-lamp-client.mjs set_brightness 50
 node tools/matter_lamp/matter-lamp-client.mjs set_color 0 100
 node tools/matter_lamp/matter-lamp-client.mjs set_color_temperature 4000
+node tools/matter_lamp/matter-lamp-client.mjs get_scenes
+node tools/matter_lamp/matter-lamp-client.mjs get_scene
+node tools/matter_lamp/matter-lamp-client.mjs set_scene rainbow
+node tools/matter_lamp/matter-lamp-client.mjs set_scene fire
+node tools/matter_lamp/matter-lamp-client.mjs set_scene northern_lights
+node tools/matter_lamp/matter-lamp-client.mjs set_scene lava_lamp
 ```
 
 Яркость задаётся как `1..100%` и преобразуется в Matter level `1..254`. Hue/Saturation задаются в процентах и преобразуются в `0..254`. Цветовая температура проверяется по физическим границам устройства. У всех операций конечный timeout, отсутствуют автоматические повторы, а после Invoke выполняется новый direct Read.
@@ -120,6 +136,13 @@ temperature=`154`, ColorMode=`0`. EnhancedColorMode изменился с ист
 несогласованного `2` при ColorMode=`0` на согласованный `0` после стандартного
 переключения режимов; дополнительных слепых команд для возврата этого служебного
 значения не отправлялось.
+
+## Следующий этап: Color music (не начат)
+
+Известный контекст для отдельной будущей задачи: vendor cluster `0x132FFC06`,
+команды `SetEnable` и `SetAnimation`, vendor category `Color music=3`, а также
+UDP/4048 с 120 спектроподобными `uint32 BE` примерно по 49 пакетов/с и
+фактическим обновлением около 22 Гц. В текущую реализацию Color music не входит.
 
 ## Восстановление
 

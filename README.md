@@ -44,6 +44,13 @@ Hue/Saturation и polling при физически обесточенной Я�
 Публичный redacted inventory:
 [docs/multi_admin/YNDX00560_INVENTORY.json](docs/multi_admin/YNDX00560_INVENTORY.json).
 
+Штатные автономные сцены также запускаются через независимую Fabric командой
+Matter ModeSelect `ChangeToMode`. Аппаратно подтверждены `rainbow` (13),
+`fire` (4), `northern_lights` (6) и `lava_lamp` (1). Команды `get_scene` и
+`get_scenes` различают активный эффект и последний выбранный ID. Прошивка лампы
+возвращает некорректное пустое значение `SupportedModes`, поэтому общий enum
+Quasar не выдаётся за список возможностей конкретного устройства.
+
 Исследование встроенного Matter HTTP API Яндекс Станции и Python-клиент для работы с уже сопряжёнными Matter-устройствами.
 
 Created and maintained by [r0ka-op](https://github.com/r0ka-op).

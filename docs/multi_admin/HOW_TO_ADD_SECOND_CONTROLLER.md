@@ -278,6 +278,24 @@ node tools/matter_lamp/matter-lamp-client.mjs --uri ws://<MATTER_SERVER_IP>:5580
 
 Аппаратно подтверждены Direct Read, On/Off, brightness, Hue/Saturation, ColorTemperature, polling, persistence recovery и работа после restart. Автоматический subscription ломается на объединённом bootstrap Read до SubscribeRequest (`peer-ack-missing`), поэтому образ отключает auto-subscription и использует bounded direct reads/polling. `available=false` не равнозначно отсутствию CASE или Direct Read.
 
+### Штатные сцены через независимую Fabric
+
+```bash
+node tools/matter_lamp/matter-lamp-client.mjs --uri ws://<MATTER_SERVER_IP>:5580/ws --node <OPERATIONAL_NODE_ID> get_scenes
+node tools/matter_lamp/matter-lamp-client.mjs --uri ws://<MATTER_SERVER_IP>:5580/ws --node <OPERATIONAL_NODE_ID> get_scene
+node tools/matter_lamp/matter-lamp-client.mjs --uri ws://<MATTER_SERVER_IP>:5580/ws --node <OPERATIONAL_NODE_ID> set_scene rainbow
+node tools/matter_lamp/matter-lamp-client.mjs --uri ws://<MATTER_SERVER_IP>:5580/ws --node <OPERATIONAL_NODE_ID> set_scene fire
+node tools/matter_lamp/matter-lamp-client.mjs --uri ws://<MATTER_SERVER_IP>:5580/ws --node <OPERATIONAL_NODE_ID> set_scene northern_lights
+node tools/matter_lamp/matter-lamp-client.mjs --uri ws://<MATTER_SERVER_IP>:5580/ws --node <OPERATIONAL_NODE_ID> set_scene lava_lamp
+```
+
+Команда использует endpoint `1`, ModeSelect `0x0050`, ChangeToMode `0x00` и
+строгий allowlist ID `1,4,6,13`. `get_scene` не называет сохранённый ID активной
+сценой, если лампа выключена или vendor category отличается от `Scene`.
+`SupportedModes` этой прошивки возвращает пустую строку вместо списка; поэтому
+`get_scenes` явно сообщает `deviceListAvailable=false` и показывает отдельно
+только аппаратно подтверждённые режимы, а не все 24 значения Quasar enum.
+
 ## 9. Home Assistant
 
 ### Вариант 1: существующий Matter.js Server
