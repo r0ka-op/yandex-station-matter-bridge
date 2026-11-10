@@ -10,6 +10,10 @@ matches the target. It permits only endpoint 1 and these standard commands:
 
 - OnOff: `off`, `on`;
 - LevelControl: `moveToLevel`;
+- ModeSelect: `changeToMode`, restricted to `lava_lamp`, `fire`,
+  `northern_lights`, and `rainbow`; the IDs come from the extracted
+  `TColorCapability.EColorScene` schema and the direct maind mapping to
+  `ChangeToMode` (Rainbow was additionally confirmed by device readback);
 - ColorControl: `moveToHueAndSaturation`, `moveToColorTemperature`.
 
 It does not expose arbitrary invokes, writes, fabric, ACL, commissioning or

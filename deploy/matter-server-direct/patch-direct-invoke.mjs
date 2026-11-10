@@ -19,9 +19,19 @@ const newBlock = `    const clusterName = clusterEntry.model.propertyName;
     const directAllowlist = new Map([
       [6, new Set(["off", "on"])],
       [8, new Set(["moveToLevel"])],
+      [80, new Set(["changeToMode"])],
       [768, new Set(["moveToHueAndSaturation", "moveToColorTemperature"])],
     ]);
     const directAllowed = directNodeId !== undefined && String(nodeId) === directNodeId && endpointId === 1 && directAllowlist.get(Number(clusterId))?.has(command) === true;
+    if (directAllowed && Number(clusterId) === 80) {
+      // These are TColorCapability.EColorScene values passed unchanged by
+      // maind to ModeSelect.ChangeToMode. Keep the list closed.
+      const allowedSceneModes = new Set([1, 4, 6, 13]);
+      const keys = isObject(commandData) ? Object.keys(commandData) : [];
+      if (keys.length !== 1 || keys[0] !== "newMode" || !Number.isInteger(commandData.newMode) || !allowedSceneModes.has(commandData.newMode)) {
+        throw ServerError.invalidArguments("ModeSelect direct invoke only permits a verified named scene mode");
+      }
+    }
     if (!directAllowed) {
       const endpoint = this.#clusterEndpoint(nodeId, endpointId, clusterName);
       const commands = endpoint.commands[clusterName];

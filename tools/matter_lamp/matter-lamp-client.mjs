@@ -11,12 +11,29 @@ export const PATH = Object.freeze({
   colorTemperatureMireds: "1/768/7",
   colorMode: "1/768/8",
   enhancedColorMode: "1/768/16385",
+  supportedModes: "1/80/0",
+  currentMode: "1/80/1",
+  lastSelectedSceneMode: "1/80/3",
+  vendorMode: "1/321911820/1",
   colorCapabilities: "1/768/16394",
   physicalMinMireds: "1/768/16395",
   physicalMaxMireds: "1/768/16396",
 });
 
-const CLUSTER = Object.freeze({ onOff: 6, level: 8, color: 768 });
+const CLUSTER = Object.freeze({ onOff: 6, level: 8, modeSelect: 80, color: 768 });
+const SCENE = Object.freeze({
+  lava_lamp: 1,
+  fire: 4,
+  northern_lights: 6,
+  rainbow: 13,
+});
+const SCENE_VERIFICATION = Object.freeze({
+  lava_lamp: "hardware-invoke-readback-visual",
+  fire: "hardware-invoke-readback-visual",
+  northern_lights: "hardware-invoke-readback-visual",
+  rainbow: "hardware-invoke-readback",
+});
+const VENDOR_MODE = Object.freeze({ 0: "none", 1: "color", 2: "scene", 3: "color_music" });
 const DEFAULT_URI = "ws://127.0.0.1:5580/ws";
 const DEFAULT_NODE = 2;
 
@@ -41,6 +58,28 @@ export function kelvinToMireds(kelvin, minMireds, maxMireds) {
 export function percentToMatterByte(value, name) {
   if (!Number.isFinite(value) || value < 0 || value > 100) throw new Error(`${name} must be 0..100 percent`);
   return Math.round(value * 254 / 100);
+}
+
+export function sceneToMode(name) {
+  const mode = SCENE[name];
+  if (mode === undefined) throw new Error(`unsupported or unverified scene: ${name}`);
+  return mode;
+}
+
+export function describeSceneState({ currentMode, lastSelectedSceneId, vendorMode, onOff }) {
+  const lastSelectedSceneName = Object.entries(SCENE).find(([, mode]) => mode === lastSelectedSceneId)?.[0] ?? null;
+  const active = onOff === true && vendorMode === 2;
+  return {
+    currentMode,
+    lastSelectedSceneId,
+    lastSelectedSceneName,
+    category: { id: vendorMode, name: VENDOR_MODE[vendorMode] ?? "unknown" },
+    onOff,
+    active,
+    activeSceneId: active ? lastSelectedSceneId : null,
+    activeSceneName: active ? lastSelectedSceneName : null,
+    sceneDeterminationAvailable: Number.isInteger(lastSelectedSceneId) && lastSelectedSceneName !== null,
+  };
 }
 
 class MatterWsClient {
@@ -210,6 +249,51 @@ export class MatterLamp {
     };
   }
 
+  async setScene(name) {
+    const newMode = sceneToMode(name);
+    await this.invoke(CLUSTER.modeSelect, "changeToMode", { newMode });
+    await delay(1_200);
+    const readback = {
+      currentMode: await this.readPath(PATH.currentMode),
+      lastSelectedSceneId: await this.readPath(PATH.lastSelectedSceneMode),
+      vendorMode: await this.readPath(PATH.vendorMode),
+      onOff: await this.readPath(PATH.onOff),
+    };
+    if (readback.lastSelectedSceneId !== newMode || readback.vendorMode !== 2 || readback.onOff !== true) {
+      throw new Error(`scene readback mismatch: lastSelected=${readback.lastSelectedSceneId} vendorMode=${readback.vendorMode} onOff=${readback.onOff}`);
+    }
+    return {
+      requested: name,
+      readback,
+    };
+  }
+
+  async getScene() {
+    const currentMode = await this.readPath(PATH.currentMode);
+    const lastSelectedSceneId = await this.readPath(PATH.lastSelectedSceneMode);
+    const vendorMode = await this.readPath(PATH.vendorMode);
+    const onOff = await this.readPath(PATH.onOff);
+    return describeSceneState({ currentMode, lastSelectedSceneId, vendorMode, onOff });
+  }
+
+  async getScenes() {
+    const supportedModesRaw = await this.readPath(PATH.supportedModes);
+    const deviceListAvailable = Array.isArray(supportedModesRaw);
+    return {
+      deviceListAvailable,
+      supportedModesRaw,
+      limitation: deviceListAvailable
+        ? null
+        : "YNDX-00560 returns a non-list value for ModeSelect.SupportedModes; the complete device-advertised list is unavailable",
+      hardwareVerifiedModes: Object.entries(SCENE).map(([name, id]) => ({
+        id,
+        name,
+        verification: SCENE_VERIFICATION[name],
+      })),
+      enumOnlyModesIncluded: false,
+    };
+  }
+
   async getCapabilities() {
     const paths = {
       onOffCommands: "1/6/65529",
@@ -273,6 +357,9 @@ async function cli() {
     else if (action === "set_brightness") result = await lamp.setBrightness(Number(positional[1]));
     else if (action === "set_color") result = await lamp.setColor(Number(positional[1]), Number(positional[2]));
     else if (action === "set_color_temperature") result = await lamp.setColorTemperature(Number(positional[1]));
+    else if (action === "set_scene") result = await lamp.setScene(String(positional[1] ?? ""));
+    else if (action === "get_scene") result = await lamp.getScene();
+    else if (action === "get_scenes") result = await lamp.getScenes();
     else throw new Error(`unknown action: ${action}`);
     console.log(JSON.stringify({ ok: true, action, nodeId: opts.node, result }, null, 2));
   } catch (error) {
