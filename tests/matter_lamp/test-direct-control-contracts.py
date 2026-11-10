@@ -15,7 +15,7 @@ class DirectControlContracts(unittest.TestCase):
         source = PATCHER.read_text(encoding="utf-8")
         self.assertIn('String(nodeId) === directNodeId', source)
         self.assertIn('endpointId === 1', source)
-        entries = re.findall(r'\[(6|8|768), new Set\(\[(.*?)\]\)\]', source)
+        entries = re.findall(r'\[(6|8|80|768), new Set\(\[(.*?)\]\)\]', source)
         actual = {
             int(cluster): set(re.findall(r'"([^"]+)"', commands))
             for cluster, commands in entries
@@ -25,11 +25,14 @@ class DirectControlContracts(unittest.TestCase):
             {
                 6: {"off", "on"},
                 8: {"moveToLevel"},
+                80: {"changeToMode"},
                 768: {"moveToHueAndSaturation", "moveToColorTemperature"},
             },
         )
         for forbidden in ("write_attribute", "commission_with_code", "remove_fabric", "invokeCommand"):
             self.assertNotIn(forbidden, source)
+        self.assertIn("allowedSceneModes = new Set([1, 4, 6, 13])", source)
+        self.assertIn('keys.length !== 1 || keys[0] !== "newMode"', source)
 
     def test_client_has_bounded_interactions_and_no_retry_loop(self):
         source = CLIENT.read_text(encoding="utf-8")
@@ -38,6 +41,10 @@ class DirectControlContracts(unittest.TestCase):
         self.assertNotRegex(source, r"\bwhile\s*\(")
         self.assertNotRegex(source, r"\bsetInterval\s*\(")
         self.assertNotIn("commission_with_code", source)
+        self.assertIn('vendorMode === 2', source)
+        self.assertIn('readback.lastSelectedSceneId !== newMode', source)
+        self.assertIn('onOff === true && vendorMode === 2', source)
+        self.assertIn('enumOnlyModesIncluded: false', source)
 
     def test_public_inventory_is_redacted(self):
         raw = INVENTORY.read_text(encoding="utf-8")
