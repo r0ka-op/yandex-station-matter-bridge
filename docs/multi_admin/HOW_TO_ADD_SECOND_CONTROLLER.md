@@ -296,6 +296,10 @@ node tools/matter_lamp/matter-lamp-client.mjs --uri ws://<MATTER_SERVER_IP>:5580
 `get_scenes` явно сообщает `deviceListAvailable=false` и показывает отдельно
 только аппаратно подтверждённые режимы, а не все 24 значения Quasar enum.
 
+### Дополнение: независимая светомузыка
+
+11 ноября 2026 года аппаратно проверено включение Color music через Matter.js и UDP/4048 replay с Ubuntu, в том числе при физически отключённой Станции. Это **отдельный этап после commissioning**, не часть процедуры добавления Fabric. Скрипты и патч пока локальные, не включены в публичный репозиторий. [Схемы, команды, результаты и ограничения](../guide/05_COLOR_MUSIC_RU.md).
+
 ## 9. Home Assistant
 
 ### Вариант 1: существующий Matter.js Server

@@ -4,7 +4,9 @@
 
 **Русский:** [Начать с наглядной схемы и выбрать свой путь](docs/guide/00_START_RU.md) · **English:** [Start with the visual guide](docs/guide/00_START_EN.md)
 
-The guides lead through preparation → one-time Matter Multi-Admin pairing → verified lamp controls and scenes → safe troubleshooting. Built entirely with GitHub Markdown, Mermaid diagrams, copyable commands, expected outputs and quick decision paths. No separate documentation website is required.
+The guides lead through preparation → one-time Matter Multi-Admin pairing → verified lamp controls and scenes → independent Color music over Matter and UDP/4048 → safe troubleshooting. Built entirely with GitHub Markdown, Mermaid diagrams, copyable commands, expected outputs and quick decision paths. No separate documentation website is required.
+
+**Hardware update (2026-11-11):** [Независимая светомузыка — RU](docs/guide/05_COLOR_MUSIC_RU.md) · [Color music — EN](docs/guide/05_COLOR_MUSIC_EN.md). Matter.js independently enabled the mode; Ubuntu UDP/4048 replay caused visible pulsing even with the Station powered off. Live FFT synthesis is not yet tested on the lamp; experimental local scripts are not in this repository.
 
 **Prerequisite:** Mini 2 with pre-existing root/SSH. No private addresses, Node IDs, credentials, pairing codes or Fabric storage are published.
 

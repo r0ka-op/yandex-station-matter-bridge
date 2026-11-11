@@ -2,13 +2,13 @@
 
 **A guided, illustrated path from a prepared lab to an independent Matter controller.**
 
-[**Русская версия**](00_START_RU.md) · [Preparation](01_SETUP_EN.md) · [Pairing](02_PAIR_EN.md) · [Controls](03_CONTROL_EN.md) · [Troubleshooting](04_RECOVERY_EN.md)
+[**Русская версия**](00_START_RU.md) · [Preparation](01_SETUP_EN.md) · [Pairing](02_PAIR_EN.md) · [Controls](03_CONTROL_EN.md) · [Color music](05_COLOR_MUSIC_EN.md) · [Troubleshooting](04_RECOVERY_EN.md)
 
 > This is **plain GitHub Markdown**, not a website. Diagrams render in GitHub. Commands are copyable, with a prerequisite, expected outcome, and safe stop procedure for every consequential step.
 
 ## What will you get?
 
-You will preserve the original Yandex control path **and add a second independent one**: PC → Matter.js → YNDX-00560. The tested setup supports On/Off, brightness, color, color temperature, and four built-in scenes. After pairing, the Station is not involved in these commands.
+You will preserve the original Yandex control path **and add a second independent one**: PC → Matter.js → YNDX-00560. The tested setup supports On/Off, brightness, color, color temperature, four built-in scenes, **and independent Color music with replayed UDP/4048 frames**. After pairing, the Station is not involved in these commands. Live FFT generation from arbitrary audio remains unverified.
 
 ```mermaid
 flowchart LR
@@ -34,7 +34,8 @@ flowchart TD
   LINK -->|Yes| CHECK["Run get_health and get_state"]
   PAIR --> CHECK
   CHECK --> CONTROL["3. Light and scene control"]
-  CONTROL --> END(["Done: no Station proxy"])
+  CONTROL --> MUSIC["5. Optional: Color music and UDP replay"]
+  MUSIC --> END(["Done: no Station proxy"])
 ```
 
 | Starting point | Go to | Expected outcome |
@@ -42,6 +43,7 @@ flowchart TD
 | Root/SSH works; no second Fabric | [Preparation →](01_SETUP_EN.md) | Matter.js healthy; private backup |
 | Server ready; first pairing needed | [Multi-Admin →](02_PAIR_EN.md) | Second Fabric; TCP/8765 closed |
 | Lamp already in Matter.js | [Controls →](03_CONTROL_EN.md) | Direct `get_state` and scene |
+| Want to replay color music | [Color music →](05_COLOR_MUSIC_EN.md) | Matter enable + UDP replay; scripts not yet published |
 | Something failed | [Troubleshooting →](04_RECOVERY_EN.md) | Recover without factory reset |
 
 
@@ -55,12 +57,14 @@ flowchart TD
 
 ## Continue
 
-**[01 · Set up the server](01_SETUP_EN.md)** → **[02 · Pair once](02_PAIR_EN.md)** → **[03 · Control lights](03_CONTROL_EN.md)** → **[04 · Troubleshoot safely](04_RECOVERY_EN.md)**
+**[01 · Set up the server](01_SETUP_EN.md)** → **[02 · Pair once](02_PAIR_EN.md)** → **[03 · Control lights](03_CONTROL_EN.md)** → **[05 · Independent color music](05_COLOR_MUSIC_EN.md)** · **[04 · Troubleshoot](04_RECOVERY_EN.md)**
 
 <details><summary><b>What is verified, and what is not?</b></summary>
 
 **Hardware verified:** two Fabrics, direct CASE/Read, light/color/temperature, four scenes, persistence recovery and direct control when the Station is powered off.
 
-**Not verified:** rooting another firmware, Home Assistant end-to-end, individual LEDs, third-party color-music UDP/4048 playback.
+**Now also hardware verified:** independent Matter.js Color music enable and Ubuntu UDP/4048 replay, including visible pulsing while the Station was powered off.
+
+**Not verified:** rooting another firmware, Home Assistant end-to-end, individual LEDs, generating a live FFT → UDP stream from audio. Replay source scripts have not yet been published.
 
 </details>

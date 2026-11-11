@@ -24,6 +24,7 @@ flowchart TD
 | `Endpoint 1 does not exist` | Matter.js не построил полную endpoint-модель | `get_state`, patched image, точный Node ID | не включать произвольный raw invoke |
 | `available=false`, но CASE есть | Subscription health ≠ прямой доступ | одиночный Direct Read | не сбрасывать лампу |
 | `SupportedModes=""` | Особенность прошивки | `get_scenes`, 4 подтверждённых эффекта | не перебирать 24 enum-значения |
+| Color music включён, свет статичен | UDP-кадры не поступают или не принимаются | прочитать enable и category=3, проверить UDP/4048 | повторять commissioning или отправлять слепые Invoke |
 | После restart узел пропал | Не тот persistent `/data` или интерфейс | compose volume/image/interface | не создавать вторую Fabric вслепую |
 | На Станции остался TCP/8765 | Cleanup не завершён | verify-clean и штатный rollback | не оставлять API открытым в LAN |
 
@@ -65,4 +66,4 @@ node tools/matter_lamp/matter-lamp-client.mjs --uri "$MATTER_URI" --node "$NODE_
 - [ ] Нет работающих capture-helper или экспериментов после остановки.
 - [ ] Приватные артефакты не вошли в Git.
 
-[**Вернуться к общей карте →**](00_START_RU.md)
+[**Светомузыка — диагностика →**](05_COLOR_MUSIC_RU.md) · [**Вернуться к общей карте →**](00_START_RU.md)

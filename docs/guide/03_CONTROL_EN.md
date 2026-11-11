@@ -114,4 +114,6 @@ From your private baseline, restore the prior color/temperature/brightness and c
 
 ## Next
 
+**Next hardware-verified feature:** [05 · Color music over Matter and UDP replay →](05_COLOR_MUSIC_EN.md). Unlike built-in scenes, it requires a Matter command to enable the mode and a separate UDP data feed. Replay scripts have not yet been published.
+
 [**Troubleshooting and rollback →**](04_RECOVERY_EN.md) · [Detailed scene contract](../multi_admin/DIRECT_CONTROL.md)

@@ -114,4 +114,6 @@ node tools/matter_lamp/matter-lamp-client.mjs --uri "$MATTER_URI" --node "$NODE_
 
 ## Что делать дальше
 
+**Следующая подтверждённая функция:** [05 · Светомузыка через Matter и UDP replay →](05_COLOR_MUSIC_RU.md). В отличие от локальных сцен, она требует включения режима через Matter и отдельного UDP-потока. Скрипты replay ещё не опубликованы.
+
 [**Устранение ошибок и откат →**](04_RECOVERY_RU.md) · [Полный технический контракт сцен](../multi_admin/DIRECT_CONTROL.md)

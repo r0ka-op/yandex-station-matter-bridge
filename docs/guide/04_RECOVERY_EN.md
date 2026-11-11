@@ -24,6 +24,7 @@ flowchart TD
 | `Endpoint 1 does not exist` | Incomplete local endpoint model | `get_state`, patched image, correct Node ID | arbitrary raw invokes |
 | `available=false` while CASE works | Subscription state differs from direct reachability | single Direct Read | factory reset |
 | `SupportedModes=""` | Firmware quirk | `get_scenes`, four verified scenes | brute-forcing 24 enum IDs |
+| Color music enabled but light static | No UDP packets or stream rejected | read enable and category=3; check UDP/4048 | repeated commissioning or blind vendor Invoke |
 | Node gone after restart | Wrong `/data` or interface | compose volume/image/interface | creating another Fabric blindly |
 | Station TCP/8765 still open | Cleanup not complete | verify-clean and guarded rollback | leaving the API exposed |
 
@@ -65,4 +66,4 @@ node tools/matter_lamp/matter-lamp-client.mjs --uri "$MATTER_URI" --node "$NODE_
 - [ ] No experimental capture processes left running.
 - [ ] No private artifacts included in Git.
 
-[**Back to the visual map →**](00_START_EN.md)
+[**Color music diagnostics →**](05_COLOR_MUSIC_EN.md) · [**Back to the visual map →**](00_START_EN.md)
