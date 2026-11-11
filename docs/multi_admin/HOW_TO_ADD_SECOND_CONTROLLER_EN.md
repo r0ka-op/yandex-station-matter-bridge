@@ -296,6 +296,10 @@ This firmware returns an empty string instead of a list for `SupportedModes`,
 so `get_scenes` reports `deviceListAvailable=false` and separately lists only
 hardware-verified modes rather than all 24 values of the general Quasar enum.
 
+### Addition: independent Color music
+
+On November 11, 2026, independent Matter.js Color music enable and Ubuntu UDP/4048 replay were hardware-tested, including operation with the Station physically powered off. This is a **separate step after commissioning**, not part of adding a Fabric. Supporting source scripts and patch remain local and are not included in this public repository. [Diagrams, contract, results and limits](../guide/05_COLOR_MUSIC_EN.md).
+
 ## 9. Home Assistant
 
 ### Option 1: use the existing Matter.js Server
